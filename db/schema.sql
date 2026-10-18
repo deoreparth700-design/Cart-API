@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS products (
 -- a unique idempotency key per user, and a unique nullable razorpay_order_id.
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL,
+    user_id INTEGER NOT NULL,
     status VARCHAR(20) NOT NULL CHECK (status IN ('created', 'paid', 'failed')),
     total_paise INT NOT NULL CHECK (total_paise >= 0),
     razorpay_order_id VARCHAR(255) UNIQUE,

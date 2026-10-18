@@ -23,19 +23,32 @@ def get_current_user(
 
     token = credentials.credentials
 
-    try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-        )
-    except jwt.ExpiredSignatureError:
+    secrets = settings.jwt_secrets
+    if not secrets:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT secret is not configured on the server",
         )
-    except jwt.InvalidTokenError:
+
+    payload = None
+    for secret in secrets:
+        try:
+            payload = jwt.decode(
+                token,
+                secret,
+                algorithms=[settings.JWT_ALGORITHM],
+            )
+            break
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except jwt.InvalidTokenError:
+            continue
+
+    if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",

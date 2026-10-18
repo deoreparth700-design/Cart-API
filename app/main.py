@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.core.database import close_pool, open_pool
+from app.routers.orders import router as orders_router
 from app.routers.products import router as products_router
 
 
@@ -21,8 +22,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Mount products router under /api
+# Mount routers under /api
 app.include_router(products_router, prefix="/api")
+app.include_router(orders_router, prefix="/api")
 
 
 # Returns a simple JSON response indicating that the API service is up and running.

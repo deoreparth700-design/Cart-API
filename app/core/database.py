@@ -17,11 +17,13 @@ pool = ConnectionPool(
 )
 
 
-# Opens the connection pool during application startup.
-# Establishes initial connections to Neon PostgreSQL so incoming requests have fast DB access.
+# Validates database configuration and opens the connection pool during application startup.
+# Establishes connections to Neon PostgreSQL so incoming requests have fast DB access.
 def open_pool():
-    if settings.DATABASE_URL and pool.closed:
-        pool.open()
+    if not settings.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not set in environment or .env file.")
+    if pool.closed:
+        pool.open(wait=True)
 
 
 # Closes all open connections in the pool during application shutdown.
@@ -35,8 +37,8 @@ def close_pool():
 # Automatically commits changes if the block completes successfully, or rolls back on any exception.
 @contextmanager
 def transaction() -> Generator[psycopg.Connection, None, None]:
-    if pool.closed and settings.DATABASE_URL:
-        pool.open()
+    if pool.closed:
+        open_pool()
     with pool.connection() as conn:
         with conn.transaction():
             yield conn

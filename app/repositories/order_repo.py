@@ -134,3 +134,70 @@ def mark_order_failed(
         )
 
 
+# Retrieves an order and its line items using the Razorpay order ID.
+# Used by webhooks to locate the internal order corresponding to incoming payment events.
+def get_order_by_razorpay_order_id(
+    conn: psycopg.Connection, razorpay_order_id: str
+) -> dict | None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT id, user_id, status, total_paise, razorpay_order_id, razorpay_payment_id, created_at
+            FROM orders
+            WHERE razorpay_order_id = %s;
+            """,
+            (razorpay_order_id,),
+        )
+        order = cursor.fetchone()
+        if not order:
+            return None
+
+        cursor.execute(
+            """
+            SELECT id, product_id, quantity, unit_price_paise
+            FROM order_items
+            WHERE order_id = %s;
+            """,
+            (order["id"],),
+        )
+        order["items"] = cursor.fetchall()
+        return order
+
+
+# Updates an order status to 'paid' and records the Razorpay payment ID.
+# Transitions the order upon successful payment capture confirmed by webhook.
+def mark_order_paid(
+    conn: psycopg.Connection, razorpay_order_id: str, razorpay_payment_id: str
+) -> dict | None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE orders
+            SET status = 'paid', razorpay_payment_id = %s
+            WHERE razorpay_order_id = %s
+            RETURNING id, user_id, status, total_paise, razorpay_order_id, razorpay_payment_id;
+            """,
+            (razorpay_payment_id, razorpay_order_id),
+        )
+        return cursor.fetchone()
+
+
+# Updates an order status to 'failed' only if it is currently in 'created' status.
+# Guards against accidental downgrade of already-paid orders by duplicate or delayed failure events.
+def mark_order_payment_failed(
+    conn: psycopg.Connection, razorpay_order_id: str, razorpay_payment_id: str | None = None
+) -> dict | None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE orders
+            SET status = 'failed', razorpay_payment_id = COALESCE(%s, razorpay_payment_id)
+            WHERE razorpay_order_id = %s AND status = 'created'
+            RETURNING id, user_id, status, total_paise, razorpay_order_id, razorpay_payment_id;
+            """,
+            (razorpay_payment_id, razorpay_order_id),
+        )
+        return cursor.fetchone()
+
+
+

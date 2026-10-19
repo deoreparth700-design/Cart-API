@@ -1,9 +1,14 @@
 # Real database tests for order transactions, inventory consistency, and item merging.
 # Verifies ACID transaction semantics against isolated Neon PostgreSQL database.
 
+import concurrent.futures
+import threading
 import uuid
+from fastapi.testclient import TestClient
 import psycopg
 from psycopg.rows import dict_row
+
+from app.main import app
 
 
 # Tests that purchasing 2 notebooks and 1 pen returns 201, computes total paise correctly, and deducts inventory.
@@ -146,3 +151,57 @@ def test_duplicate_product_ids_are_merged(client, products, user_tokens, get_sto
     items = get_order_items(body["id"])
     assert len(items) == 1
     assert items[0]["quantity"] == 3
+
+
+# Tests concurrent race condition where two different users order the last remaining item in stock simultaneously.
+# Verifies that exactly one user receives 201 Created and the other receives a clean 409 Conflict, leaving stock at 0.
+def test_concurrent_race_two_users_last_item_in_stock(products, user_tokens, get_stock):
+    from tests.conftest import test_db_url
+    pen = products["pen"]
+    user1 = user_tokens["user1"]
+    user2 = user_tokens["user2"]
+
+    # Explicitly set pen stock to exactly 1 in the test database
+    with psycopg.connect(test_db_url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE products SET stock = 1 WHERE id = %s;", (pen["id"],))
+
+    assert get_stock(pen["id"]) == 1
+
+    payload = {"items": [{"product_id": str(pen["id"]), "quantity": 1}]}
+    headers1 = {**user1["headers"], "Idempotency-Key": f"race-u1-{uuid.uuid4().hex[:10]}"}
+    headers2 = {**user2["headers"], "Idempotency-Key": f"race-u2-{uuid.uuid4().hex[:10]}"}
+
+    barrier = threading.Barrier(2)
+
+    def order_worker(headers):
+        thread_client = TestClient(app)
+        try:
+            barrier.wait()
+            response = thread_client.post("/api/orders", json=payload, headers=headers)
+            return response.status_code, response.json()
+        finally:
+            thread_client.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(order_worker, headers1)
+        f2 = executor.submit(order_worker, headers2)
+        status1, body1 = f1.result()
+        status2, body2 = f2.result()
+
+    statuses = {status1, status2}
+    assert statuses == {201, 409}, f"Expected one 201 and one 409, but received {status1} and {status2}"
+
+    # Verify the 409 response is a clean HTTP 409 rather than a 500 or DB exception
+    res_409_body = body1 if status1 == 409 else body2
+    assert "insufficient stock" in res_409_body.get("detail", "").lower()
+
+    # Verify inventory was decremented to exactly 0
+    assert get_stock(pen["id"]) == 0
+
+    # Verify exactly one order row was committed in the database
+    with psycopg.connect(test_db_url, autocommit=True, row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM orders;")
+            assert cur.fetchone()["count"] == 1
+

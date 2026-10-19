@@ -2,19 +2,19 @@ from uuid import UUID
 import psycopg
 
 
-# Inserts a new order row into the orders table with initial status 'created'.
-# Establishes the order record with the server-verified total_paise and associates it with the authenticated user.
+# Inserts a new order row into the orders table with initial status 'created' and the provided idempotency key.
+# Establishes the order record with the server-verified total_paise, associates it with the authenticated user, and stores the idempotency key for duplicate prevention.
 def create_order(
-    conn: psycopg.Connection, user_id: int, total_paise: int
+    conn: psycopg.Connection, user_id: int, total_paise: int, idempotency_key: str
 ) -> dict:
     with conn.cursor() as cursor:
         cursor.execute(
             """
-            INSERT INTO orders (user_id, status, total_paise, razorpay_order_id)
-            VALUES (%s, 'created', %s, NULL)
+            INSERT INTO orders (user_id, status, total_paise, razorpay_order_id, idempotency_key)
+            VALUES (%s, 'created', %s, NULL, %s)
             RETURNING id, user_id, status, total_paise, created_at;
             """,
-            (user_id, total_paise),
+            (user_id, total_paise, idempotency_key),
         )
         return cursor.fetchone()
 
@@ -72,3 +72,34 @@ def get_order_by_id_and_user(
         )
         order["items"] = cursor.fetchall()
         return order
+
+
+# Looks up an order and its line items using the authenticated user's ID and an idempotency key.
+# Returns the complete existing order record if one was previously placed with this key, or None if no match is found.
+def get_order_by_idempotency_key(
+    conn: psycopg.Connection, user_id: int, key: str
+) -> dict | None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT id, user_id, status, total_paise, created_at
+            FROM orders
+            WHERE user_id = %s AND idempotency_key = %s;
+            """,
+            (user_id, key),
+        )
+        order = cursor.fetchone()
+        if not order:
+            return None
+
+        cursor.execute(
+            """
+            SELECT id, product_id, quantity, unit_price_paise
+            FROM order_items
+            WHERE order_id = %s;
+            """,
+            (order["id"],),
+        )
+        order["items"] = cursor.fetchall()
+        return order
+

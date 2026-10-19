@@ -37,12 +37,16 @@ class OrderItemResponse(BaseModel):
 class OrderResponse(BaseModel):
     """
     Schema for the complete order response.
-    Includes the server-computed total in paise and the detailed items list.
+    Includes the server-computed total in paise, line items, and public Razorpay order/key details for client checkout.
     """
     id: UUID
     user_id: int
     status: str
     total_paise: int
+    razorpay_order_id: str | None = None
+    razorpay_key_id: str | None = None
+    RAZORPAY_KEY_ID: str | None = None
     items: list[OrderItemResponse]
 
     model_config = ConfigDict(from_attributes=True)
+

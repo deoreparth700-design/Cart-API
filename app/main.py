@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.core.database import close_pool, open_pool
 from app.routers.orders import router as orders_router
@@ -25,6 +26,9 @@ app = FastAPI(
 # Mount routers under /api
 app.include_router(products_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
+
+# Mount static directory for checkout test page
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 # Returns a simple JSON response indicating that the API service is up and running.

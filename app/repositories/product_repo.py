@@ -48,3 +48,20 @@ def decrement_product_stock(
         )
         row = cursor.fetchone()
         return row["price_paise"] if row else None
+
+
+# Increments stock for a product when an order fails or is cancelled.
+# Restores the previously deducted inventory count back to the product catalog.
+def increment_product_stock(
+    conn: psycopg.Connection, product_id: UUID, quantity: int
+) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE products
+            SET stock = stock + %s
+            WHERE id = %s;
+            """,
+            (quantity, product_id),
+        )
+

@@ -52,7 +52,7 @@ def get_order_by_id_and_user(
     with conn.cursor() as cursor:
         cursor.execute(
             """
-            SELECT id, user_id, status, total_paise, created_at
+            SELECT id, user_id, status, total_paise, razorpay_order_id, created_at
             FROM orders
             WHERE id = %s AND user_id = %s;
             """,
@@ -82,7 +82,7 @@ def get_order_by_idempotency_key(
     with conn.cursor() as cursor:
         cursor.execute(
             """
-            SELECT id, user_id, status, total_paise, created_at
+            SELECT id, user_id, status, total_paise, razorpay_order_id, created_at
             FROM orders
             WHERE user_id = %s AND idempotency_key = %s;
             """,
@@ -102,4 +102,35 @@ def get_order_by_idempotency_key(
         )
         order["items"] = cursor.fetchall()
         return order
+
+
+# Updates an order with its external Razorpay order identifier after successful creation with the gateway.
+def set_razorpay_order_id(
+    conn: psycopg.Connection, order_id: UUID, razorpay_order_id: str
+) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE orders
+            SET razorpay_order_id = %s
+            WHERE id = %s;
+            """,
+            (razorpay_order_id, order_id),
+        )
+
+
+# Marks an order as failed when payment order generation encounters an error.
+def mark_order_failed(
+    conn: psycopg.Connection, order_id: UUID
+) -> None:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE orders
+            SET status = 'failed'
+            WHERE id = %s;
+            """,
+            (order_id,),
+        )
+
 

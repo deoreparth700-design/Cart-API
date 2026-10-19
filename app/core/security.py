@@ -9,11 +9,11 @@ from app.core.config import settings
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-# Verifies the JWT Bearer token and extracts the authenticated user ID.
-# Protects private endpoints by rejecting requests with missing, expired, or tampered tokens with HTTP 401.
+# Verifies the JWT Bearer token using JWT_SECRET and extracts the authenticated user ID from the 'userId' claim.
+# Protects private endpoints by rejecting requests with missing, expired, or invalid tokens with HTTP 401 without casting userId.
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-) -> int:
+):
     if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -23,40 +23,27 @@ def get_current_user(
 
     token = credentials.credentials
 
-    secrets = settings.jwt_secrets
-    if not secrets:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT secret is not configured on the server",
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
         )
-
-    payload = None
-    for secret in secrets:
-        try:
-            payload = jwt.decode(
-                token,
-                secret,
-                algorithms=[settings.JWT_ALGORITHM],
-            )
-            break
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has expired",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        except jwt.InvalidTokenError:
-            continue
-
-    if payload is None:
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Project 2 auth-service stores the user id under the 'userId' claim.
-    user_id = payload.get("userId") or payload.get("sub") or payload.get("user_id")
+    # Auth Service sets the user id under the 'userId' claim.
+    user_id = payload.get("userId")
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -64,11 +51,4 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    try:
-        return int(user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user ID format in token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return user_id

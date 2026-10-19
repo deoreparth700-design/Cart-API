@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     """
     DATABASE_URL: str = ""
     JWT_SECRET: str = ""
-    JWT_ACCESS_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
@@ -24,11 +23,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"
     )
-
-    @property
-    def jwt_secrets(self) -> list[str]:
-        """Returns all populated JWT signing secrets to support local and deployed Auth Service tokens."""
-        return [s for s in [self.JWT_SECRET, self.JWT_ACCESS_SECRET] if s]
 
 
 # Reads and caches settings from the .env file.

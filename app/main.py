@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.database import close_pool, open_pool
 from app.routers.orders import router as orders_router
 from app.routers.products import router as products_router
+from app.routers.webhooks import router as webhooks_router
 
 
 # Manages startup and shutdown lifecycle events for the application.
@@ -26,6 +27,7 @@ app = FastAPI(
 # Mount routers under /api
 app.include_router(products_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
+app.include_router(webhooks_router, prefix="/api")
 
 # Mount static directory for checkout test page
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

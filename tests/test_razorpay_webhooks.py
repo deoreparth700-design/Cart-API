@@ -54,6 +54,41 @@ def make_payment_captured_payload(
     }
 
 
+def make_order_paid_payload(
+    razorpay_order_id: str,
+    razorpay_payment_id: str = "pay_test123",
+    amount: int = 15000,
+) -> dict:
+    return {
+        "entity": "event",
+        "account_id": "acc_test",
+        "event": "order.paid",
+        "contains": ["order", "payment"],
+        "payload": {
+            "order": {
+                "entity": {
+                    "id": razorpay_order_id,
+                    "entity": "order",
+                    "amount": amount,
+                    "currency": "INR",
+                    "status": "paid",
+                }
+            },
+            "payment": {
+                "entity": {
+                    "id": razorpay_payment_id,
+                    "entity": "payment",
+                    "amount": amount,
+                    "currency": "INR",
+                    "status": "captured",
+                    "order_id": razorpay_order_id,
+                }
+            },
+        },
+        "created_at": 1600000000,
+    }
+
+
 def make_payment_failed_payload(
     razorpay_order_id: str,
     razorpay_payment_id: str = "pay_fail123",
@@ -86,7 +121,7 @@ def make_payment_failed_payload(
 def test_valid_signature_is_accepted(client, monkeypatch):
     monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
 
-    payload_dict = make_payment_captured_payload("order_valid_123")
+    payload_dict = make_payment_captured_payload("order_valid_123", amount=15000)
     payload_bytes = json.dumps(payload_dict).encode("utf-8")
     sig = generate_signature(payload_bytes)
 
@@ -99,9 +134,14 @@ def test_valid_signature_is_accepted(client, monkeypatch):
     monkeypatch.setattr(
         webhook_service.order_repo,
         "get_order_by_razorpay_order_id",
-        lambda conn, r_id: {"id": uuid.uuid4(), "status": "created"},
+        lambda conn, r_id: {"id": uuid.uuid4(), "status": "created", "total_paise": 15000},
     )
-    monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", lambda conn, r_id, p_id: None)
+    monkeypatch.setattr(
+        webhook_service.order_repo,
+        "mark_order_paid",
+        lambda conn, r_id, p_id: {"id": uuid.uuid4(), "status": "paid"},
+    )
+
 
     response = client.post(
         "/api/webhooks/razorpay",
@@ -125,7 +165,6 @@ def test_invalid_or_missing_signature_rejected(client, monkeypatch):
     payload_bytes = json.dumps(make_payment_captured_payload("order_123")).encode("utf-8")
     valid_sig = generate_signature(payload_bytes)
 
-    # Database modification flag to prove no DB interaction occurred
     db_touched = False
     @contextmanager
     def guard_tx():
@@ -153,7 +192,7 @@ def test_invalid_or_missing_signature_rejected(client, monkeypatch):
                 **headers,
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 401
         assert "signature" in response.json()["detail"].lower()
         assert db_touched is False, "Database must NOT be accessed when signature check fails"
 
@@ -167,13 +206,15 @@ def test_payment_captured_updates_order_to_paid(client, monkeypatch):
     mock_rzp_pay_id = "pay_captured_999"
 
     payload_bytes = json.dumps(
-        make_payment_captured_payload(mock_rzp_order_id, mock_rzp_pay_id)
+        make_payment_captured_payload(mock_rzp_order_id, mock_rzp_pay_id, amount=15000)
     ).encode("utf-8")
     sig = generate_signature(payload_bytes)
 
     marked_paid_args = []
     def mock_mark_paid(conn, rzp_order_id, rzp_pay_id):
         marked_paid_args.append((rzp_order_id, rzp_pay_id))
+        return {"id": mock_order_id, "status": "paid"}
+
 
     @contextmanager
     def fake_tx():
@@ -184,7 +225,7 @@ def test_payment_captured_updates_order_to_paid(client, monkeypatch):
     monkeypatch.setattr(
         webhook_service.order_repo,
         "get_order_by_razorpay_order_id",
-        lambda conn, r_id: {"id": mock_order_id, "status": "created", "items": []},
+        lambda conn, r_id: {"id": mock_order_id, "status": "created", "total_paise": 15000, "items": []},
     )
     monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", mock_mark_paid)
 
@@ -203,12 +244,66 @@ def test_payment_captured_updates_order_to_paid(client, monkeypatch):
     assert response.json()["order_id"] == str(mock_order_id)
 
 
-# Case 5: A valid payment.failed event updates order to failed and restores stock
-def test_payment_failed_updates_order_and_restores_stock(client, monkeypatch):
+# Amount check: Amount mismatch does NOT mark paid and returns status amount_mismatch
+def test_payment_captured_amount_mismatch_leaves_order_created(client, monkeypatch):
     monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
 
     mock_order_id = uuid.uuid4()
-    mock_prod_id = uuid.uuid4()
+    mock_rzp_order_id = "order_rzp_amount_mismatch"
+
+    # Webhook payload claims 10000 paise was paid, but order expects 15000 paise
+    payload_bytes = json.dumps(
+        make_payment_captured_payload(mock_rzp_order_id, "pay_underpaid", amount=10000)
+    ).encode("utf-8")
+    sig = generate_signature(payload_bytes)
+
+    order_marked_paid = False
+    def unexpected_mark_paid(*args, **kwargs):
+        nonlocal order_marked_paid
+        order_marked_paid = True
+
+    event_recorded = False
+    def mock_record_event(conn, eid, et):
+        nonlocal event_recorded
+        event_recorded = True
+        return True
+
+    @contextmanager
+    def fake_tx():
+        yield object()
+
+    monkeypatch.setattr(webhook_service, "transaction", fake_tx)
+    monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", mock_record_event)
+    monkeypatch.setattr(
+        webhook_service.order_repo,
+        "get_order_by_razorpay_order_id",
+        lambda conn, r_id: {"id": mock_order_id, "status": "created", "total_paise": 15000},
+    )
+    monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", unexpected_mark_paid)
+
+    response = client.post(
+        "/api/webhooks/razorpay",
+        content=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Razorpay-Signature": sig,
+            "X-Razorpay-Event-Id": "evt_mismatch_1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "amount_mismatch"
+    assert response.json()["expected_paise"] == 15000
+    assert response.json()["received_paise"] == 10000
+    assert order_marked_paid is False, "Order must NOT be marked as paid when amounts mismatch"
+    assert event_recorded is True, "Event must be recorded to prevent duplicate delivery loops"
+
+
+# Case 5 (Updated): payment.failed must NOT change order status and must NOT restore stock
+def test_payment_failed_leaves_order_created_and_stock_untouched(client, monkeypatch):
+    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
+
+    mock_order_id = uuid.uuid4()
     mock_rzp_order_id = "order_rzp_pay_fail"
     mock_rzp_pay_id = "pay_failed_456"
 
@@ -217,31 +312,39 @@ def test_payment_failed_updates_order_and_restores_stock(client, monkeypatch):
     ).encode("utf-8")
     sig = generate_signature(payload_bytes)
 
-    failed_args = []
-    def mock_mark_failed(conn, rzp_order_id, rzp_pay_id):
-        failed_args.append((rzp_order_id, rzp_pay_id))
+    event_recorded = False
+    def mock_record_event(conn, eid, et):
+        nonlocal event_recorded
+        event_recorded = True
+        return True
 
-    restored_items = []
-    def mock_increment_stock(conn, prod_id, qty):
-        restored_items.append((prod_id, qty))
+    order_updated = False
+    def unexpected_order_update(*args, **kwargs):
+        nonlocal order_updated
+        order_updated = True
+
+    stock_restored = False
+    def unexpected_stock_restore(*args, **kwargs):
+        nonlocal stock_restored
+        stock_restored = True
 
     @contextmanager
     def fake_tx():
         yield object()
 
     monkeypatch.setattr(webhook_service, "transaction", fake_tx)
-    monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", lambda conn, eid, et: True)
+    monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", mock_record_event)
     monkeypatch.setattr(
         webhook_service.order_repo,
         "get_order_by_razorpay_order_id",
         lambda conn, r_id: {
             "id": mock_order_id,
             "status": "created",
-            "items": [{"product_id": mock_prod_id, "quantity": 3}],
+            "total_paise": 15000,
+            "items": [{"product_id": uuid.uuid4(), "quantity": 2}],
         },
     )
-    monkeypatch.setattr(webhook_service.order_repo, "mark_order_payment_failed", mock_mark_failed)
-    monkeypatch.setattr(webhook_service.product_repo, "increment_product_stock", mock_increment_stock)
+    monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", unexpected_order_update)
 
     response = client.post(
         "/api/webhooks/razorpay",
@@ -254,10 +357,117 @@ def test_payment_failed_updates_order_and_restores_stock(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert failed_args == [(mock_rzp_order_id, mock_rzp_pay_id)]
-    assert restored_items == [(mock_prod_id, 3)]
     assert response.json()["status"] == "processed"
     assert response.json()["event"] == "payment.failed"
+    assert event_recorded is True
+    assert order_updated is False, "payment.failed must NOT change order status"
+    assert stock_restored is False, "payment.failed must NOT restore stock (customer may retry)"
+
+
+# Multi-event: payment.captured and order.paid both arrive for same payment
+def test_duplicate_paid_events_second_event_is_already_paid(client, monkeypatch):
+    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
+
+    mock_order_id = uuid.uuid4()
+    mock_rzp_order_id = "order_rzp_double_paid"
+
+    payload_bytes = json.dumps(
+        make_order_paid_payload(mock_rzp_order_id, amount=15000)
+    ).encode("utf-8")
+    sig = generate_signature(payload_bytes)
+
+    marked_paid_called = False
+    def unexpected_mark_paid(*args, **kwargs):
+        nonlocal marked_paid_called
+        marked_paid_called = True
+
+    @contextmanager
+    def fake_tx():
+        yield object()
+
+    monkeypatch.setattr(webhook_service, "transaction", fake_tx)
+    monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", lambda conn, eid, et: True)
+    # Order is ALREADY in 'paid' status
+    monkeypatch.setattr(
+        webhook_service.order_repo,
+        "get_order_by_razorpay_order_id",
+        lambda conn, r_id: {"id": mock_order_id, "status": "paid", "total_paise": 15000},
+    )
+    monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", unexpected_mark_paid)
+
+    response = client.post(
+        "/api/webhooks/razorpay",
+        content=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Razorpay-Signature": sig,
+            "X-Razorpay-Event-Id": "evt_order_paid_2",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "already_paid"
+    assert response.json()["order_id"] == str(mock_order_id)
+    assert marked_paid_called is False, "mark_order_paid must not be called if already paid"
+
+
+# Failed-then-captured retry flow: payment.failed then payment.captured on retry ends in 'paid'
+def test_failed_then_captured_leaves_stock_intact_and_order_paid(client, monkeypatch):
+    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
+
+    mock_order_id = uuid.uuid4()
+    mock_rzp_order_id = "order_retry_flow"
+
+    current_order_status = "created"
+
+    def mock_get_order(conn, r_id):
+        return {"id": mock_order_id, "status": current_order_status, "total_paise": 15000}
+
+    def mock_mark_paid(conn, r_id, p_id):
+        nonlocal current_order_status
+        current_order_status = "paid"
+        return {"id": mock_order_id, "status": "paid"}
+
+
+    @contextmanager
+    def fake_tx():
+        yield object()
+
+    monkeypatch.setattr(webhook_service, "transaction", fake_tx)
+    monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", lambda conn, eid, et: True)
+    monkeypatch.setattr(webhook_service.order_repo, "get_order_by_razorpay_order_id", mock_get_order)
+    monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", mock_mark_paid)
+
+    # 1. First event: payment.failed
+    fail_bytes = json.dumps(make_payment_failed_payload(mock_rzp_order_id)).encode("utf-8")
+    sig_fail = generate_signature(fail_bytes)
+    res1 = client.post(
+        "/api/webhooks/razorpay",
+        content=fail_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Razorpay-Signature": sig_fail,
+            "X-Razorpay-Event-Id": "evt_fail_1",
+        },
+    )
+    assert res1.status_code == 200
+    assert current_order_status == "created", "Order must stay in 'created' after payment.failed"
+
+    # 2. Customer retries payment: payment.captured arrives
+    cap_bytes = json.dumps(make_payment_captured_payload(mock_rzp_order_id, amount=15000)).encode("utf-8")
+    sig_cap = generate_signature(cap_bytes)
+    res2 = client.post(
+        "/api/webhooks/razorpay",
+        content=cap_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-Razorpay-Signature": sig_cap,
+            "X-Razorpay-Event-Id": "evt_cap_2",
+        },
+    )
+    assert res2.status_code == 200
+    assert res2.json()["status"] == "processed"
+    assert current_order_status == "paid", "Order must successfully transition to 'paid'"
 
 
 # Case 6: Unknown or unmatched orders are handled safely without crashing
@@ -275,7 +485,6 @@ def test_unknown_order_handled_safely(client, monkeypatch):
 
     monkeypatch.setattr(webhook_service, "transaction", fake_tx)
     monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", lambda conn, eid, et: True)
-    # Order lookup returns None (unmatched order)
     monkeypatch.setattr(webhook_service.order_repo, "get_order_by_razorpay_order_id", lambda conn, r_id: None)
 
     response = client.post(
@@ -312,7 +521,6 @@ def test_duplicate_event_id_ignored_safely(client, monkeypatch):
         yield object()
 
     monkeypatch.setattr(webhook_service, "transaction", fake_tx)
-    # Return False to simulate event already recorded in webhook_events
     monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", lambda conn, eid, et: False)
     monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", unexpected_order_update)
 
@@ -337,7 +545,7 @@ def test_database_failure_rolls_back_atomically(client, monkeypatch):
     monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
 
     payload_bytes = json.dumps(
-        make_payment_captured_payload("order_rollback_test")
+        make_payment_captured_payload("order_rollback_test", amount=15000)
     ).encode("utf-8")
     sig = generate_signature(payload_bytes)
 
@@ -360,7 +568,7 @@ def test_database_failure_rolls_back_atomically(client, monkeypatch):
     monkeypatch.setattr(
         webhook_service.order_repo,
         "get_order_by_razorpay_order_id",
-        lambda conn, r_id: {"id": uuid.uuid4(), "status": "created"},
+        lambda conn, r_id: {"id": uuid.uuid4(), "status": "created", "total_paise": 15000},
     )
 
     def failing_mark_paid(conn, r_id, p_id):
@@ -396,7 +604,6 @@ def test_missing_event_id_and_malformed_payload(client, monkeypatch):
         headers={
             "Content-Type": "application/json",
             "X-Razorpay-Signature": sig1,
-            # No X-Razorpay-Event-Id header
         },
     )
     assert res1.status_code == 400
@@ -419,27 +626,17 @@ def test_missing_event_id_and_malformed_payload(client, monkeypatch):
     assert "malformed" in res2.json()["detail"].lower()
 
 
-# Case 11: An already-paid order cannot accidentally be downgraded by duplicate or delayed failure event
-def test_already_paid_order_cannot_be_downgraded_by_failure_event(client, monkeypatch):
+# Order in 'failed' status: payment.captured must NOT mark it paid and reply must NOT be 'processed'
+def test_payment_captured_for_failed_order_not_processed(client, monkeypatch):
     monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", DUMMY_WEBHOOK_SECRET)
 
     mock_order_id = uuid.uuid4()
-    mock_rzp_order_id = "order_already_paid_123"
+    mock_rzp_order_id = "order_rzp_failed_status"
 
     payload_bytes = json.dumps(
-        make_payment_failed_payload(mock_rzp_order_id, "pay_failed_delayed")
+        make_payment_captured_payload(mock_rzp_order_id, amount=15000)
     ).encode("utf-8")
     sig = generate_signature(payload_bytes)
-
-    status_changed_to_failed = False
-    def unexpected_fail_update(*args, **kwargs):
-        nonlocal status_changed_to_failed
-        status_changed_to_failed = True
-
-    stock_restored = False
-    def unexpected_stock_restore(*args, **kwargs):
-        nonlocal stock_restored
-        stock_restored = True
 
     @contextmanager
     def fake_tx():
@@ -447,18 +644,14 @@ def test_already_paid_order_cannot_be_downgraded_by_failure_event(client, monkey
 
     monkeypatch.setattr(webhook_service, "transaction", fake_tx)
     monkeypatch.setattr(webhook_service.webhook_repo, "record_webhook_event", lambda conn, eid, et: True)
-    # Order is already 'paid'
+    # Order is in 'failed' status in the database
     monkeypatch.setattr(
         webhook_service.order_repo,
         "get_order_by_razorpay_order_id",
-        lambda conn, r_id: {
-            "id": mock_order_id,
-            "status": "paid",
-            "items": [{"product_id": uuid.uuid4(), "quantity": 2}],
-        },
+        lambda conn, r_id: {"id": mock_order_id, "status": "failed", "total_paise": 15000},
     )
-    monkeypatch.setattr(webhook_service.order_repo, "mark_order_payment_failed", unexpected_fail_update)
-    monkeypatch.setattr(webhook_service.product_repo, "increment_product_stock", unexpected_stock_restore)
+    # mark_order_paid returns None because status != 'created'
+    monkeypatch.setattr(webhook_service.order_repo, "mark_order_paid", lambda conn, r_id, p_id: None)
 
     response = client.post(
         "/api/webhooks/razorpay",
@@ -466,12 +659,12 @@ def test_already_paid_order_cannot_be_downgraded_by_failure_event(client, monkey
         headers={
             "Content-Type": "application/json",
             "X-Razorpay-Signature": sig,
-            "X-Razorpay-Event-Id": "evt_delayed_fail",
+            "X-Razorpay-Event-Id": "evt_failed_order_pay",
         },
     )
 
     assert response.status_code == 200
+    assert response.json()["status"] != "processed"
     assert response.json()["status"] == "ignored"
-    assert response.json()["reason"] == "order_already_paid"
-    assert status_changed_to_failed is False, "Already-paid order must NOT be marked failed"
-    assert stock_restored is False, "Stock must NOT be restored for already-paid order"
+    assert response.json()["reason"] == "order_status_failed"
+

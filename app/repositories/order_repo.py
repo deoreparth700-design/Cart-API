@@ -164,7 +164,7 @@ def get_order_by_razorpay_order_id(
         return order
 
 
-# Updates an order status to 'paid' and records the Razorpay payment ID.
+# Updates an order status to 'paid' and records the Razorpay payment ID only if currently in 'created' status.
 # Transitions the order upon successful payment capture confirmed by webhook.
 def mark_order_paid(
     conn: psycopg.Connection, razorpay_order_id: str, razorpay_payment_id: str
@@ -174,30 +174,13 @@ def mark_order_paid(
             """
             UPDATE orders
             SET status = 'paid', razorpay_payment_id = %s
-            WHERE razorpay_order_id = %s
-            RETURNING id, user_id, status, total_paise, razorpay_order_id, razorpay_payment_id;
-            """,
-            (razorpay_payment_id, razorpay_order_id),
-        )
-        return cursor.fetchone()
-
-
-# Updates an order status to 'failed' only if it is currently in 'created' status.
-# Guards against accidental downgrade of already-paid orders by duplicate or delayed failure events.
-def mark_order_payment_failed(
-    conn: psycopg.Connection, razorpay_order_id: str, razorpay_payment_id: str | None = None
-) -> dict | None:
-    with conn.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE orders
-            SET status = 'failed', razorpay_payment_id = COALESCE(%s, razorpay_payment_id)
             WHERE razorpay_order_id = %s AND status = 'created'
             RETURNING id, user_id, status, total_paise, razorpay_order_id, razorpay_payment_id;
             """,
             (razorpay_payment_id, razorpay_order_id),
         )
         return cursor.fetchone()
+
 
 
 

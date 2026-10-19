@@ -1,11 +1,14 @@
 import hashlib
 import hmac
 import json
+import logging
 from fastapi import HTTPException, status
 
 from app.core.config import settings
 from app.core.database import transaction
-from app.repositories import order_repo, product_repo, webhook_repo
+from app.repositories import order_repo, webhook_repo
+
+logger = logging.getLogger(__name__)
 
 
 # Verifies the Razorpay webhook signature using HMAC-SHA256 comparison against the exact raw request bytes.
@@ -24,7 +27,7 @@ def verify_webhook_signature(
 
 
 # Processes an incoming Razorpay webhook event atomically inside a single database transaction.
-# Verifies signature, guards against duplicate event IDs, updates order status, and ensures already-paid orders cannot be downgraded.
+# Verifies signature, guards against duplicate event IDs, verifies payment amount, and safely handles retries.
 def process_razorpay_webhook(
     raw_body: bytes,
     signature: str | None,
@@ -33,7 +36,7 @@ def process_razorpay_webhook(
     # Step 1: Verify HMAC-SHA256 signature using the raw HTTP request body
     if not verify_webhook_signature(raw_body, signature, settings.RAZORPAY_WEBHOOK_SECRET):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing webhook signature",
         )
 
@@ -89,10 +92,13 @@ def process_razorpay_webhook(
         payment_entity = payload_data.get("payment", {}).get("entity", {})
         razorpay_payment_id = payment_entity.get("id")
         razorpay_order_id = payment_entity.get("order_id")
+        paid_amount = payment_entity.get("amount")
 
         if not razorpay_order_id:
             order_entity = payload_data.get("order", {}).get("entity", {})
             razorpay_order_id = order_entity.get("id")
+            if paid_amount is None:
+                paid_amount = order_entity.get("amount")
 
         if not razorpay_order_id:
             return {
@@ -118,13 +124,38 @@ def process_razorpay_webhook(
                     "razorpay_order_id": razorpay_order_id,
                 }
 
-            order_repo.mark_order_paid(conn, razorpay_order_id, razorpay_payment_id)
+            # Verify amount matches expected total_paise
+            if paid_amount is None or paid_amount != order["total_paise"]:
+                logger.warning(
+                    "Webhook amount mismatch for order %s (razorpay_order_id=%s): expected %s paise, received %s paise",
+                    order["id"],
+                    razorpay_order_id,
+                    order["total_paise"],
+                    paid_amount,
+                )
+                return {
+                    "status": "amount_mismatch",
+                    "order_id": str(order["id"]),
+                    "expected_paise": order["total_paise"],
+                    "received_paise": paid_amount,
+                }
+
+            updated_order = order_repo.mark_order_paid(conn, razorpay_order_id, razorpay_payment_id)
+            if not updated_order:
+                return {
+                    "status": "ignored",
+                    "reason": f"order_status_{order['status']}",
+                    "order_id": str(order["id"]),
+                    "razorpay_order_id": razorpay_order_id,
+                }
+
             return {
                 "status": "processed",
                 "event": event_type,
                 "order_id": str(order["id"]),
                 "razorpay_order_id": razorpay_order_id,
             }
+
 
         # Handle payment failed events
         elif event_type == "payment.failed":
@@ -136,24 +167,8 @@ def process_razorpay_webhook(
                     "razorpay_order_id": razorpay_order_id,
                 }
 
-            # Guard: An already-paid order cannot be downgraded by a delayed or duplicate failure event
-            if order["status"] == "paid":
-                return {
-                    "status": "ignored",
-                    "reason": "order_already_paid",
-                    "order_id": str(order["id"]),
-                }
-
-            if order["status"] == "created":
-                order_repo.mark_order_payment_failed(
-                    conn, razorpay_order_id, razorpay_payment_id
-                )
-                # Restore stock for each item of the failed order
-                for item in order.get("items", []):
-                    product_repo.increment_product_stock(
-                        conn, item["product_id"], item["quantity"]
-                    )
-
+            # Razorpay allows customer payment retries on the same order.
+            # Do NOT fail order and do NOT restore stock to prevent inventory overselling.
             return {
                 "status": "processed",
                 "event": event_type,
@@ -167,3 +182,4 @@ def process_razorpay_webhook(
             "reason": "unhandled_event",
             "event": event_type,
         }
+

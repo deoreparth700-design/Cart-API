@@ -6,6 +6,7 @@ import threading
 import uuid
 import pytest
 from fastapi.testclient import TestClient
+from app.core.config import settings
 from app.main import app
 
 # Stores race condition outcome to report to user
@@ -27,6 +28,14 @@ def test_same_idempotency_key_twice_replays_existing_order(client, products, use
     order_id = body1["id"]
     rzp_order_id = body1["razorpay_order_id"]
 
+    # Verify public razorpay_key_id is returned and sensitive secrets are never leaked in response text
+    assert "razorpay_key_id" in body1
+    assert body1["razorpay_key_id"] == settings.RAZORPAY_KEY_ID
+    if settings.RAZORPAY_KEY_SECRET:
+        assert settings.RAZORPAY_KEY_SECRET not in res1.text
+    if settings.RAZORPAY_WEBHOOK_SECRET:
+        assert settings.RAZORPAY_WEBHOOK_SECRET not in res1.text
+
     assert get_stock(pen["id"]) == 5 - 1  # Stock decremented once
     assert len(mock_razorpay_order_sdk) == 1
 
@@ -37,6 +46,11 @@ def test_same_idempotency_key_twice_replays_existing_order(client, products, use
 
     assert body2["id"] == order_id
     assert body2["razorpay_order_id"] == rzp_order_id
+    assert body2.get("razorpay_key_id") == settings.RAZORPAY_KEY_ID
+    if settings.RAZORPAY_KEY_SECRET:
+        assert settings.RAZORPAY_KEY_SECRET not in res2.text
+    if settings.RAZORPAY_WEBHOOK_SECRET:
+        assert settings.RAZORPAY_WEBHOOK_SECRET not in res2.text
     assert get_stock(pen["id"]) == 4      # Stock untouched on replay
     assert len(mock_razorpay_order_sdk) == 1, "Razorpay SDK must not be invoked on idempotent replay"
 

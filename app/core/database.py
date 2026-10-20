@@ -7,12 +7,16 @@ from psycopg_pool import ConnectionPool
 from app.core.config import settings
 
 # Global connection pool initialized with DATABASE_URL from settings.
+# check=ConnectionPool.check_connection verifies connections are alive before handing them out.
+# max_idle=60.0 retires idle connections before Neon's proxy drops quiet SSL sockets.
 # row_factory=dict_row ensures all query results are accessible as key-value dictionaries.
 pool = ConnectionPool(
     conninfo=settings.DATABASE_URL,
     min_size=1,
     max_size=10,
     open=False,
+    check=ConnectionPool.check_connection,
+    max_idle=60.0,
     kwargs={"row_factory": dict_row},
 )
 

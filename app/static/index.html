@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- SEO -->
+  <title>CartAPI Store — Stationery Shop Demo</title>
+  <meta name="description"
+    content="A polished e-commerce demo storefront powered by CartAPI. Browse stationery, add to cart, and complete a Razorpay test-mode payment." />
+
+  <!-- Razorpay Checkout SDK (loaded before our JS) -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <!-- Design system -->
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ── Navigation ──────────────────────────────────────────────────────────── -->
+<nav id="navbar">
+  <a href="/static/index.html" class="nav-brand gradient-text">CartAPI&nbsp;Store</a>
+
+  <div class="nav-actions">
+    <a href="/docs" class="btn btn-ghost btn-sm" target="_blank" rel="noopener">API Docs</a>
+
+    <button id="cart-btn" aria-label="Open cart">
+      🛒 Cart
+      <span id="cart-count" class="hidden">0</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ── Hero ────────────────────────────────────────────────────────────────── -->
+<section id="hero">
+  <div class="hero-badge">
+    <span class="dot"></span>
+    Test-mode · Razorpay · FastAPI · Neon PostgreSQL
+  </div>
+
+  <h1><span class="gradient-text">CartAPI</span></h1>
+
+  <p>
+    Real stock management, atomic transactions, and secure Razorpay payments
+    with HMAC webhook verification.
+  </p>
+
+  <a href="#store" class="btn btn-primary">
+    Shop Now&nbsp; ↓
+  </a>
+</section>
+
+<!-- ── Product Catalog ──────────────────────────────────────────────────────── -->
+<section id="store">
+  <div id="store-header">
+    <h2>Catalog</h2>
+    <span id="product-count"></span>
+  </div>
+  <div id="product-grid">
+    <!-- Cards injected by app.js -->
+  </div>
+</section>
+
+<!-- ── Cart Drawer ──────────────────────────────────────────────────────────── -->
+<div id="cart-overlay" role="dialog" aria-modal="true" aria-label="Shopping cart"></div>
+
+<aside id="cart-drawer">
+  <div class="cart-header">
+    <h2>Your Cart 🛒</h2>
+    <button id="cart-close" aria-label="Close cart">✕</button>
+  </div>
+
+  <div id="cart-items">
+    <!-- Items injected by app.js -->
+  </div>
+
+  <div class="cart-footer">
+    <div class="cart-total-row">
+      <span class="cart-total-label">Total (incl. tax)</span>
+      <span class="cart-total-amount gradient-text" id="cart-total">₹0.00</span>
+    </div>
+
+    <button id="checkout-btn" class="btn btn-primary" disabled>
+      Proceed to Pay
+    </button>
+
+    <p style="font-size:0.78rem;color:var(--text-muted);text-align:center;margin:-4px 0">
+      Secured by Razorpay · Test mode only
+    </p>
+  </div>
+</aside>
+
+<!-- ── Checkout / Status Modal ──────────────────────────────────────────────── -->
+<div id="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div id="modal">
+    <div class="spinner" id="modal-spinner"></div>
+    <div class="modal-icon" id="modal-icon"></div>
+    <h2 id="modal-title">Processing…</h2>
+    <div id="modal-body"></div>
+    <div id="modal-actions" style="display:flex;gap:12px;justify-content:center;margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- ── Toast Container ──────────────────────────────────────────────────────── -->
+<div id="toast-container" aria-live="polite"></div>
+
+<!-- ── Footer ───────────────────────────────────────────────────────────────── -->
+<footer>
+  <p>
+    <strong>CartAPI</strong> — Demo storefront.
+    Uses Razorpay <strong>test mode</strong> — no real money is charged.
+    &nbsp;·&nbsp;
+    <a href="/docs" target="_blank" rel="noopener">API Docs</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/deoreparth700-design/Cart-API" target="_blank" rel="noopener">GitHub</a>
+  </p>
+  <p style="margin-top:6px">
+    Test card: <code style="color:var(--accent-start)">4111 1111 1111 1111</code>
+    &nbsp;· Expiry: any future date &nbsp;· CVV: any &nbsp;· OTP: <code style="color:var(--accent-start)">123456</code>
+  </p>
+</footer>
+
+<!-- SPA logic -->
+<script src="/static/app.js"></script>
+</body>
+</html>

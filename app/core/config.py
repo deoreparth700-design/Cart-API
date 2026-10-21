@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
     RAZORPAY_WEBHOOK_SECRET: str = ""
+    DEMO_MODE: bool = False
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,

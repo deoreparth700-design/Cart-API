@@ -72,7 +72,11 @@ async function fetchDemoToken() {
     const data = await apiFetch('/api/demo-token');
     state.token = data.token;
   } catch (e) {
-    toast('Could not obtain demo token — some features disabled', 'error', 6000);
+    if (e.status === 404) {
+      toast('Demo mode is disabled. Store is in preview mode.', 'info', 5000);
+    } else {
+      toast('Could not obtain demo token — some features disabled', 'error', 6000);
+    }
   }
 }
 
@@ -320,7 +324,7 @@ let currentError = '';
 // ── Checkout flow ─────────────────────────────────────────────────────────────
 async function checkout() {
   if (!state.token) {
-    toast('Demo token not available — try refreshing', 'error');
+    toast('Demo checkout is disabled on this server.', 'info', 4000);
     return;
   }
   if (state.cart.size === 0) {

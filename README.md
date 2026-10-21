@@ -68,6 +68,7 @@ Only the webhook can set paid.
 | `RAZORPAY_KEY_SECRET` | Secret key for Razorpay test mode API authentication. | Razorpay Dashboard under Settings > API Keys. |
 | `RAZORPAY_WEBHOOK_SECRET` | Secret key used to verify HMAC-SHA256 webhook signatures. | Configured when creating the webhook in Razorpay Dashboard. |
 | `TEST_DATABASE_URL` | Connection string for a separate, empty test database with `db/schema.sql` applied. | Created as an isolated database or branch on Neon. |
+| `DEMO_MODE` | Turns on `/api/demo-token` for the storefront demo (default: false; must be true for the storefront checkout to work). | Set to `true` locally or in demo environments, leave `false` in production. |
 
 ## API Endpoints
 
@@ -171,6 +172,7 @@ I removed three guards on purpose and watched what happened, then restored them:
 - Reusing a key with a different cart returns the first order.
 - No refunds.
 - No rate limiting.
+- With DEMO_MODE on, anyone can get a 30-minute token for a fixed demo user (id 999999), place test-mode orders and use up stock; there is no rate limiting.
 
 ## Screenshots
 

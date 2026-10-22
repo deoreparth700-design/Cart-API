@@ -10,6 +10,34 @@ The storefront uses Razorpay **test mode**. Orders and payment status depend on 
 
 CartAPI is an orders and payments backend service that manages catalog stock, creates Razorpay test-mode payment orders, and processes signed webhooks. An incoming payment webhook is the only mechanism permitted to transition an order status to paid. The application is built with Python, FastAPI, PostgreSQL on Neon, plain SQL queries executed through psycopg v3, and Razorpay test mode.
 
+## Testing Razorpay Payments
+
+CartAPI integrates Razorpay in **Test Mode** to safely simulate order creation, checkout flows, and webhook callbacks without transferring real money or requiring real banking credentials.
+
+### Official Test Card Details
+
+| Field | Value | Notes |
+| :--- | :--- | :--- |
+| **Payment Provider** | Razorpay | Test Mode simulation |
+| **Card Network** | Visa (Domestic) | Official Razorpay test card |
+| **Card Number** | `4100 2800 0000 1007` | Can be copied with one click on the storefront |
+| **Expiry Date** | Any future date | e.g., `12/28` |
+| **CVV** | Any random 3-digit CVV | e.g., `123` |
+| **Documentation** | [Razorpay Test Card Details](https://razorpay.com/docs/payments/payments/test-card-details/) | Official Razorpay test card documentation |
+
+> **⚠️ Notice:** This card is strictly for **Razorpay Test Mode**. Never enter your real personal credit/debit card details for this demo, and never use test card details with Live Mode credentials.
+
+### Step-by-Step Checkout Testing on the Live Storefront
+
+1. **Open the Storefront:** Navigate to the live demo at **[CartAPI Storefront](https://cart-api-m4g4.onrender.com/static/index.html)** (or `http://localhost:8000/static/index.html` locally).
+2. **Copy Test Card Number:** In the **Test Payment Details** section, click the **Copy Card Number** button to copy `4100280000001007` to your clipboard.
+3. **Add Items to Cart:** Browse the catalog (e.g. Notebook, Pen, Ruler) and add items to your cart.
+4. **Proceed to Checkout:** Open the cart drawer and click **Proceed to Pay**. CartAPI will atomically reserve stock and initialize a Razorpay payment order.
+5. **Select Card in Checkout:** When the Razorpay Checkout popup appears, choose **Card** as the payment method.
+6. **Enter Test Credentials:** Paste the copied card number `4100 2800 0000 1007`, enter any future expiry date (e.g. `12/28`), and any random CVV (e.g. `123`).
+7. **Simulate Payment Authorization:** Complete the simulated flow following on-screen prompts. If an OTP prompt appears, follow Razorpay's Test Mode instructions (e.g., click "Success" or enter the test OTP). Never enter a real bank OTP.
+8. **Verify Server-Side Status:** The checkout popup closing or reporting success in the browser does not by itself mark an order as paid in CartAPI. An order transitions to `paid` strictly when Razorpay delivers a cryptographically verified `payment.captured` webhook. You can confirm the persisted status via `GET /api/orders/{order_id}`.
+
 ## Payment Flow
 
 ```mermaid
@@ -150,7 +178,7 @@ Only the webhook can set paid.
    http://localhost:8000/static/checkout_test.html?order_id=<razorpay_order_id>&amount=<total_paise>&key=<razorpay_key_id>
    ```
 5. Complete payment:
-   Use test card `4111 1111 1111 1111` with any future expiry date and any CVV. Enter OTP `123456`.
+   Use official test card `4100 2800 0000 1007` with any future expiry date and any random 3-digit CVV. Follow Razorpay's on-screen Test Mode interface instructions.
 6. Expected result:
    Razorpay delivers a signed webhook to `/api/webhooks/razorpay`. The API validates the signature and marks the order status as `paid` in the database.
 

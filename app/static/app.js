@@ -406,6 +406,66 @@ async function checkout() {
   rzp.open();
 }
 
+// ── Copy test card number with fallback ───────────────────────────────────────
+const TEST_CARD_NUMBER = '4100280000001007';
+
+function setupCopyCardButton() {
+  const copyBtn = document.getElementById('copy-card-btn');
+  const copyBtnText = document.getElementById('copy-btn-text');
+  const copyStatus = document.getElementById('copy-status');
+  const fallbackWrap = document.getElementById('copy-fallback-wrap');
+  const fallbackInput = document.getElementById('copy-fallback-input');
+
+  if (!copyBtn) return;
+
+  copyBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    let copied = false;
+
+    // 1. Try modern navigator.clipboard API if available
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(TEST_CARD_NUMBER);
+        copied = true;
+      } catch (err) {
+        copied = false;
+      }
+    }
+
+    // 2. Fallback to execCommand('copy') via input selection
+    if (!copied && fallbackInput) {
+      try {
+        fallbackWrap.classList.remove('hidden');
+        fallbackInput.select();
+        fallbackInput.setSelectionRange(0, 99999);
+        copied = document.execCommand('copy');
+      } catch (err) {
+        copied = false;
+      }
+    }
+
+    if (copied) {
+      copyBtn.classList.add('btn-copied');
+      if (copyBtnText) copyBtnText.textContent = 'Copied!';
+      if (copyStatus) copyStatus.textContent = 'Test card number copied!';
+      toast('Test card number copied!', 'success', 2500);
+
+      setTimeout(() => {
+        copyBtn.classList.remove('btn-copied');
+        if (copyBtnText) copyBtnText.textContent = 'Copy Card Number';
+        if (copyStatus) copyStatus.textContent = '';
+      }, 2000);
+    } else if (fallbackInput) {
+      // 3. Graceful degradation: reveal selectable text field for manual copy
+      fallbackWrap.classList.remove('hidden');
+      fallbackInput.focus();
+      fallbackInput.select();
+      if (copyStatus) copyStatus.textContent = 'Card number selected. Press Ctrl+C or Cmd+C to copy.';
+      toast('Could not auto-copy. Number selected for manual copy.', 'error', 4000);
+    }
+  });
+}
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   // Wire up static UI events
@@ -413,6 +473,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('cart-close').addEventListener('click', closeCart);
   document.getElementById('cart-overlay').addEventListener('click', closeCart);
   document.getElementById('checkout-btn').addEventListener('click', checkout);
+  setupCopyCardButton();
 
   // Close modal on overlay click
   document.getElementById('modal-overlay').addEventListener('click', (e) => {

@@ -67,19 +67,46 @@ Only the webhook can set paid.
 
 ### Docker (FastAPI + PostgreSQL)
 
-1. Start the application and local PostgreSQL database:
+**Prerequisite:** Install Docker Desktop and make sure it is running.
+
+1. Build the API image and start FastAPI with its local PostgreSQL database:
+
    ```bash
-   docker compose up -d db api
+   docker compose up --build -d db api
    ```
-   The database automatically initializes schema (`db/schema.sql`) and seed data (`db/seed.sql`) on initial startup, persisting across restarts without reseeding.
-2. Verify API health:
-   ```bash
-   curl http://localhost:8000/health
+
+   On first startup, PostgreSQL initializes the schema and seed data from `db/schema.sql` and `db/seed.sql`. The named database volume keeps local data across container restarts and ordinary `docker compose down` / `up` cycles.
+
+2. Verify the application:
+
+   - Health check: [http://localhost:8000/health](http://localhost:8000/health) — expected response: `{"status":"ok"}`
+   - Interactive API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+   - Product catalog: [http://localhost:8000/api/products](http://localhost:8000/api/products)
+
+   If host port `8000` is already in use, select another host port in PowerShell:
+
+   ```powershell
+   $env:PORT = "8001"
+   docker compose up --build -d db api
    ```
-3. Run the full isolated test suite in Docker:
+
+   Then open the API at `http://localhost:8001`.
+
+3. Run the full test suite in Docker:
+
    ```bash
    docker compose run --rm test
    ```
+
+   The test runner uses the separate local PostgreSQL service `db_test`, not the application database `db` or your Neon database. Razorpay API calls are mocked by the automated tests; the test run does not make real payments.
+
+**Configuration note:** The Compose configuration uses placeholder JWT and Razorpay values, with `DEMO_MODE=false`. The API health check and automated tests can run with this setup, but testing a real Razorpay test-mode checkout requires valid test credentials and a `JWT_SECRET` that matches the service issuing your tokens. Configure these locally and never commit real secrets.
+
+**Stopping the environment:**
+
+- `docker compose stop` stops running containers but keeps them.
+- `docker compose down` removes containers and the Compose network while preserving named database volumes.
+- **Warning:** `docker compose down -v` also deletes the named database volumes and the local database data stored in them.
 
 ## Environment Variables
 
@@ -149,7 +176,7 @@ The helper script `scripts/sign_webhook.py` sends signed payloads from a JSON fi
 
 ## Tests
 
-Tests run against an isolated remote database specified by `TEST_DATABASE_URL` in `.env`. Execution takes a few minutes because real database network round-trips occur for each test. Only calls to the Razorpay API are mocked.
+When running `python -m pytest` locally, tests use the dedicated test database configured by `TEST_DATABASE_URL` in `.env`; never point this variable at production data. The Docker test command uses the separate local PostgreSQL service `db_test` instead, so Docker tests do not require a remote Neon test database. Automated tests mock calls to the Razorpay API.
 
 Run the test suite locally:
 ```bash

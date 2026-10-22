@@ -65,6 +65,22 @@ Only the webhook can set paid.
 
 > Note for macOS/Linux: Activate the virtual environment with `source .venv/bin/activate` and copy the environment template using `cp .env.example .env`.
 
+### Docker (FastAPI + PostgreSQL)
+
+1. Start the application and local PostgreSQL database:
+   ```bash
+   docker compose up -d db api
+   ```
+   The database automatically initializes schema (`db/schema.sql`) and seed data (`db/seed.sql`) on initial startup, persisting across restarts without reseeding.
+2. Verify API health:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+3. Run the full isolated test suite in Docker:
+   ```bash
+   docker compose run --rm test
+   ```
+
 ## Environment Variables
 
 | Variable | Description | Where to Get |
@@ -135,9 +151,14 @@ The helper script `scripts/sign_webhook.py` sends signed payloads from a JSON fi
 
 Tests run against an isolated remote database specified by `TEST_DATABASE_URL` in `.env`. Execution takes a few minutes because real database network round-trips occur for each test. Only calls to the Razorpay API are mocked.
 
-Run the test suite:
+Run the test suite locally:
 ```bash
 python -m pytest
+```
+
+Run the test suite in Docker (isolated `db_test` PostgreSQL service):
+```bash
+docker compose run --rm test
 ```
 
 ### Test Files

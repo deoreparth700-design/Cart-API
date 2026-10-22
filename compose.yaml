@@ -1,0 +1,104 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Local PostgreSQL service for main application
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: cartapi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cartapi
+      POSTGRES_USER: cartapi_user
+      POSTGRES_PASSWORD: cartapi_password
+    volumes:
+      # Persistent storage for local application database
+      - postgres_data:/var/lib/postgresql/data
+      # Schema and seed scripts execute only when the data directory is newly initialized
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cartapi_user -d cartapi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # No exposed host ports to keep database strictly accessible over Docker internal network
+
+  # ---------------------------------------------------------------------------
+  # Isolated PostgreSQL service strictly for integration tests
+  # ---------------------------------------------------------------------------
+  db_test:
+    image: postgres:16-alpine
+    container_name: cartapi-db-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cartapi_test
+      POSTGRES_USER: cartapi_test_user
+      POSTGRES_PASSWORD: cartapi_test_password
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      # Mount schema only; tests manage table truncations and custom test seed rows
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cartapi_test_user -d cartapi_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # No exposed host ports to maintain test isolation
+
+  # ---------------------------------------------------------------------------
+  # FastAPI Application
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cartapi-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://cartapi_user:cartapi_password@db:5432/cartapi
+      - JWT_SECRET=dev_jwt_secret_placeholder_cartapi_32chars_min
+      - JWT_ALGORITHM=HS256
+      - RAZORPAY_KEY_ID=rzp_test_placeholder_key_id
+      - RAZORPAY_KEY_SECRET=placeholder_razorpay_key_secret
+      - RAZORPAY_WEBHOOK_SECRET=placeholder_razorpay_webhook_secret
+      - DEMO_MODE=false
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # Test Runner (executes full pytest test suite in isolated container)
+  # ---------------------------------------------------------------------------
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: cartapi-test
+    environment:
+      - DATABASE_URL=postgresql://cartapi_user:cartapi_password@db:5432/cartapi
+      - TEST_DATABASE_URL=postgresql://cartapi_test_user:cartapi_test_password@db_test:5432/cartapi_test
+      - JWT_SECRET=dev_jwt_secret_cartapi_test_isolation_32chars
+      - JWT_ALGORITHM=HS256
+      - RAZORPAY_KEY_ID=rzp_test_placeholder_key_id
+      - RAZORPAY_KEY_SECRET=placeholder_key_secret_not_used
+      - RAZORPAY_WEBHOOK_SECRET=placeholder_webhook_secret_for_tests
+      - DEMO_MODE=false
+    depends_on:
+      db_test:
+        condition: service_healthy
+    profiles:
+      - test
+
+volumes:
+  postgres_data:
+  postgres_test_data:

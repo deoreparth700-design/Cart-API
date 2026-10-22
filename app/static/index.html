@@ -50,6 +50,88 @@
   </a>
 </section>
 
+<!-- ── Test Payment Details ────────────────────────────────────────────────── -->
+<section id="test-payment" class="test-payment-section" aria-labelledby="test-payment-title">
+  <div class="test-payment-container">
+    <div class="test-payment-header">
+      <div class="test-payment-badge">
+        <span class="dot"></span>
+        Razorpay Test Mode
+      </div>
+      <h2 id="test-payment-title">Test Payment Details</h2>
+      <p class="test-payment-subtitle">
+        Simulated payment credentials for testing the complete end-to-end checkout flow.
+      </p>
+    </div>
+
+    <div class="test-payment-grid">
+      <!-- Left column: Visual test card & copy button -->
+      <div class="test-card-col">
+        <div class="virtual-card">
+          <div class="virtual-card-top">
+            <div class="card-chip" aria-hidden="true"></div>
+            <span class="card-network">VISA</span>
+          </div>
+
+          <div class="virtual-card-number-wrap">
+            <span class="virtual-card-label">Card Number</span>
+            <div class="virtual-card-number" id="test-card-display">4100 2800 0000 1007</div>
+          </div>
+
+          <div class="virtual-card-bottom">
+            <div class="card-meta-item">
+              <span class="virtual-card-label">Provider</span>
+              <span class="virtual-card-val">Razorpay</span>
+            </div>
+            <div class="card-meta-item">
+              <span class="virtual-card-label">Expiry</span>
+              <span class="virtual-card-val">Any future date</span>
+            </div>
+            <div class="card-meta-item">
+              <span class="virtual-card-label">CVV</span>
+              <span class="virtual-card-val">Any random CVV</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          <button type="button" id="copy-card-btn" class="btn btn-primary copy-btn" aria-label="Copy test card number 4100280000001007">
+            <span class="copy-icon" aria-hidden="true">📋</span>
+            <span id="copy-btn-text">Copy Card Number</span>
+          </button>
+          <span id="copy-status" class="copy-status-text" role="status" aria-live="polite"></span>
+
+          <div id="copy-fallback-wrap" class="copy-fallback-wrap hidden">
+            <label for="copy-fallback-input" class="copy-fallback-label">Select and copy manually:</label>
+            <input type="text" id="copy-fallback-input" readonly value="4100280000001007" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column: Instructions and safety notice -->
+      <div class="test-instructions-col">
+        <h3>How to Test Checkout</h3>
+        <ol class="test-steps-list">
+          <li><strong>Click Copy Card Number</strong> to copy <code>4100280000001007</code> to your clipboard.</li>
+          <li><strong>Add a product</strong> to your cart from the catalog below and proceed to checkout.</li>
+          <li><strong>Select Card:</strong> When Razorpay Checkout opens, select <em>Card</em> as the payment method.</li>
+          <li><strong>Paste the copied test card number</strong> into the card number field.</li>
+          <li><strong>Enter any future expiry date</strong> (e.g. <code>12/28</code>) and a random CVV (e.g. <code>123</code>).</li>
+          <li><strong>Complete Razorpay's simulated payment flow</strong> using the instructions shown by its test interface.</li>
+          <li><strong>OTP prompt:</strong> If Razorpay requests an OTP, follow its current Test Mode instructions. Never enter a real bank OTP or real payment credentials.</li>
+        </ol>
+
+        <div class="test-notice-box" role="note">
+          <span class="notice-icon" aria-hidden="true">⚠️</span>
+          <p>
+            <strong>Notice:</strong> This card is for Razorpay Test Mode only. Use it only when the payment integration is configured with Test Mode credentials. Never enter your personal card details for this demo.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ── Product Catalog ──────────────────────────────────────────────────────── -->
 <section id="store">
   <div id="store-header">
@@ -115,8 +197,8 @@
     <a href="https://github.com/deoreparth700-design/Cart-API" target="_blank" rel="noopener">GitHub</a>
   </p>
   <p style="margin-top:6px">
-    Test card: <code style="color:var(--accent-start)">4111 1111 1111 1111</code>
-    &nbsp;· Expiry: any future date &nbsp;· CVV: any &nbsp;· OTP: <code style="color:var(--accent-start)">123456</code>
+    Test card: <code style="color:var(--accent-start)">4100 2800 0000 1007</code>
+    &nbsp;· Expiry: any future date &nbsp;· CVV: any &nbsp;· Test OTP: follow Razorpay on-screen prompts
   </p>
 </footer>
 

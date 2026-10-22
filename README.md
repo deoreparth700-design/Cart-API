@@ -1,5 +1,7 @@
 # CartAPI — Orders & Payments Backend with Razorpay (2026)
 
+[![Tests](https://github.com/deoreparth700-design/Cart-API/actions/workflows/tests.yml/badge.svg)](https://github.com/deoreparth700-design/Cart-API/actions/workflows/tests.yml)
+
 CartAPI is an orders and payments backend service that manages catalog stock, creates Razorpay test-mode payment orders, and processes signed webhooks. An incoming payment webhook is the only mechanism permitted to transition an order status to paid. The application is built with Python, FastAPI, PostgreSQL on Neon, plain SQL queries executed through psycopg v3, and Razorpay test mode.
 
 ## Payment Flow

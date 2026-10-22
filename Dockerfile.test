@@ -1,0 +1,32 @@
+# Test runner Dockerfile for CartAPI integration test suite
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install curl for diagnostics if needed
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies including pytest and httpx
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application source code and tests
+COPY . .
+
+# Copy entrypoint script and normalize line endings for container execution
+COPY docker-test-entrypoint.sh /usr/local/bin/docker-test-entrypoint.sh
+RUN tr -d '\r' < /usr/local/bin/docker-test-entrypoint.sh > /usr/local/bin/entrypoint-clean.sh \
+    && mv /usr/local/bin/entrypoint-clean.sh /usr/local/bin/docker-test-entrypoint.sh \
+    && chmod +x /usr/local/bin/docker-test-entrypoint.sh
+
+# Create non-root user with write permissions to /app (required for test .env and .pytest_cache)
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+ENTRYPOINT ["/usr/local/bin/docker-test-entrypoint.sh"]
+CMD ["pytest", "-v"]

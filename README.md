@@ -1,6 +1,7 @@
 # CartAPI — Orders & Payments Backend with Razorpay (2026)
 
 [![Tests](https://github.com/deoreparth700-design/Cart-API/actions/workflows/tests.yml/badge.svg)](https://github.com/deoreparth700-design/Cart-API/actions/workflows/tests.yml)
+
 ## 🌐 Live Demo
 
 **[Open the CartAPI storefront ↗](https://cart-api-m4g4.onrender.com/static/index.html)**
@@ -36,7 +37,7 @@ CartAPI integrates Razorpay in **Test Mode** to safely simulate order creation, 
 5. **Select Card in Checkout:** When the Razorpay Checkout popup appears, choose **Card** as the payment method.
 6. **Enter Test Credentials:** Paste the copied card number `4100 2800 0000 1007`, enter any future expiry date (e.g. `12/28`), and any random CVV (e.g. `123`).
 7. **Simulate Payment Authorization:** Complete the simulated flow following on-screen prompts. If an OTP prompt appears, follow Razorpay's Test Mode instructions (e.g., click "Success" or enter the test OTP). Never enter a real bank OTP.
-8. **Verify Server-Side Status:** The checkout popup closing or reporting success in the browser does not by itself mark an order as paid in CartAPI. An order transitions to `paid` strictly when Razorpay delivers a cryptographically verified `payment.captured` webhook. You can confirm the persisted status via `GET /api/orders/{order_id}`.
+8. **Verify Server-Side Status:** The checkout popup closing or reporting success in the browser does not by itself mark an order as paid in CartAPI. An order transitions to `paid` strictly when Razorpay delivers a cryptographically verified `payment.captured` (or `order.paid`) webhook. You can confirm the persisted status via `GET /api/orders/{order_id}`.
 
 ## Payment Flow
 
@@ -66,7 +67,7 @@ Only the webhook can set paid.
 1. Clone the repository:
    ```powershell
    git clone https://github.com/deoreparth700-design/Cart-API.git
-   cd "Cart API"
+   cd Cart-API
    ```
 2. Create and activate a virtual environment:
    ```powershell
@@ -153,12 +154,17 @@ Only the webhook can set paid.
 
 | Method | Path | Login Needed | Headers | Success | Errors |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/` | No | None | `307` redirect to `/static/index.html` | None |
 | `GET` | `/health` | No | None | `200` | None |
+| `GET` | `/static/index.html` | No | None | `200` | `404` |
 | `GET` | `/static/checkout_test.html` | No | None (reads URL query parameters) | `200` | `404` |
+| `GET` | `/api/demo-token` | No | None | `200` (only when `DEMO_MODE=true`) | `404` (when demo mode is off) |
 | `GET` | `/api/products` | No | None | `200` | `500` |
 | `POST` | `/api/orders` | Yes | `Authorization: Bearer <token>`<br>`Idempotency-Key: <string>`<br>`Content-Type: application/json` | `201` (new)<br>`200` (replayed) | `400`, `401`, `404`, `409`, `502` |
 | `GET` | `/api/orders/{id}` | Yes | `Authorization: Bearer <token>` | `200` | `401`, `404` |
 | `POST` | `/api/webhooks/razorpay` | No (HMAC signed) | `X-Razorpay-Signature: <string>`<br>`X-Razorpay-Event-Id: <string>`<br>`Content-Type: application/json` | `200` | `400`, `401` |
+
+> `/api/demo-token` is hidden from the Swagger docs on purpose. It powers the storefront demo and returns a 30-minute token for a fixed demo user (id `999999`).
 
 ## Try a Payment End to End
 
@@ -218,6 +224,8 @@ docker compose run --rm test
 
 ### Test Files
 
+- `tests/test_demo_auth.py`
+  Tests the demo-token endpoint: returns 404 when `DEMO_MODE` is off, returns a token for the fixed demo user with a 30-minute expiry when on, ignores query parameters, and keeps demo orders isolated from other users' orders.
 - `tests/test_edge_cases.py`
   Tests edge cases such as static HTML delivery and malformed JSON payloads. Verifies that unexpected errors roll back transactions and non-idempotency unique errors re-raise.
 - `tests/test_order_idempotency.py`
@@ -279,9 +287,18 @@ I removed three guards on purpose and watched what happened, then restored them:
 
 ```text
 Cart-API/
+├── .github/
+│   └── workflows/
+│       └── tests.yml
+├── .dockerignore
+├── .env.docker.example
 ├── .env.example
 ├── .gitignore
+├── Dockerfile
+├── Dockerfile.test
 ├── README.md
+├── compose.yaml
+├── docker-test-entrypoint.sh
 ├── requirements.txt
 ├── app/
 │   ├── main.py
@@ -294,6 +311,7 @@ Cart-API/
 │   │   ├── product_repo.py
 │   │   └── webhook_repo.py
 │   ├── routers/
+│   │   ├── demo_auth.py
 │   │   ├── orders.py
 │   │   ├── products.py
 │   │   └── webhooks.py
@@ -305,14 +323,20 @@ Cart-API/
 │   │   ├── razorpay_service.py
 │   │   └── webhook_service.py
 │   └── static/
+│       ├── index.html
+│       ├── app.js
+│       ├── style.css
 │       └── checkout_test.html
 ├── db/
 │   ├── schema.sql
 │   └── seed.sql
+├── docs/
+│   └── images/             # README screenshots
 ├── scripts/
 │   └── sign_webhook.py
 └── tests/
     ├── conftest.py
+    ├── test_demo_auth.py
     ├── test_edge_cases.py
     ├── test_order_idempotency.py
     ├── test_order_transaction.py

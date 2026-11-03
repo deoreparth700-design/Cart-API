@@ -184,3 +184,55 @@ def mark_order_paid(
 
 
 
+
+
+ORDER_EXPIRY_MINUTES = 15
+
+
+# Finds and marks expired 'created' orders as 'failed' and restores product stock atomically.
+# Using UPDATE ... WHERE status = 'created' ... RETURNING guarantees each expired order is released exactly once under concurrency.
+def release_expired_orders(
+    conn: psycopg.Connection, expiry_minutes: int = ORDER_EXPIRY_MINUTES
+) -> list[UUID]:
+    if not hasattr(conn, "cursor"):
+        return []
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE orders
+            SET status = 'failed'
+            WHERE status = 'created'
+              AND created_at < NOW() - (%s || ' minutes')::interval
+            RETURNING id;
+            """,
+            (expiry_minutes,),
+        )
+        expired_orders = cursor.fetchall()
+        if not expired_orders:
+            return []
+
+        expired_order_ids = [row["id"] for row in expired_orders]
+
+        cursor.execute(
+            """
+            SELECT product_id, SUM(quantity) AS total_quantity
+            FROM order_items
+            WHERE order_id = ANY(%s)
+            GROUP BY product_id;
+            """,
+            (expired_order_ids,),
+        )
+        items_to_restore = cursor.fetchall()
+
+        for item in items_to_restore:
+            cursor.execute(
+                """
+                UPDATE products
+                SET stock = stock + %s
+                WHERE id = %s;
+                """,
+                (item["total_quantity"], item["product_id"]),
+            )
+
+        return expired_order_ids

@@ -51,6 +51,9 @@ def create_order(
     # Step 3: Run Phase 4 database transaction with race protection
     try:
         with transaction() as conn:
+            # Release stock for any abandoned orders older than 15 minutes before reserving stock
+            order_repo.release_expired_orders(conn)
+
             processed_items = []
             total_paise = 0
 

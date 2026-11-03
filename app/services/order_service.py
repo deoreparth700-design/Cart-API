@@ -1,4 +1,5 @@
 from collections import defaultdict
+import logging
 from uuid import UUID
 from fastapi import HTTPException, status
 from psycopg.errors import UniqueViolation
@@ -8,6 +9,8 @@ from app.core.database import transaction
 from app.repositories import order_repo, product_repo
 from app.schemas.order import OrderCreate
 from app.services import razorpay_service
+
+logger = logging.getLogger(__name__)
 
 
 # Creates an order idempotently and generates a corresponding Razorpay payment order.
@@ -111,6 +114,7 @@ def create_order(
             receipt=str(order["id"]),
         )
     except Exception as exc:
+        logger.exception("Payment provider call failed for order %s", order["id"])
         # If the Razorpay call fails: run a second transaction that sets the order to 'failed'
         # and gives the stock back for every item, then return HTTP 502 Bad Gateway.
         with transaction() as conn:
@@ -121,7 +125,7 @@ def create_order(
                 )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to create Razorpay payment order: {str(exc)}",
+            detail="Payment provider error. Please try again later.",
         )
 
     # Save the returned razorpay_order_id on our order in a second transaction

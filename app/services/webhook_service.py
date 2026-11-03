@@ -142,6 +142,12 @@ def process_razorpay_webhook(
 
             updated_order = order_repo.mark_order_paid(conn, razorpay_order_id, razorpay_payment_id)
             if not updated_order:
+                if order["status"] == "failed":
+                    logger.warning(
+                        "Payment captured for expired/failed order %s (razorpay payment %s) - manual refund may be needed",
+                        order["id"],
+                        razorpay_payment_id,
+                    )
                 return {
                     "status": "ignored",
                     "reason": f"order_status_{order['status']}",

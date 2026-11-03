@@ -255,19 +255,21 @@ def test_payment_captured_with_wrong_amount(client, sign_webhook, get_order_row)
     assert get_order_row(order_id)["status"] == "created", "Order must stay in 'created' status"
 
 
-# Tests that an order already in 'failed' status receiving payment.captured stays 'failed' and replies with 'ignored'.
-def test_order_in_failed_status_receives_payment_captured(client, sign_webhook, get_order_row):
+# Tests that an order already in 'failed' status receiving payment.captured stays 'failed', replies with 'ignored', and logs a warning for manual refund.
+def test_order_in_failed_status_receives_payment_captured(client, sign_webhook, get_order_row, caplog):
+    import logging
     from tests.conftest import test_db_url
     rzp_order_id = f"order_{uuid.uuid4().hex[:14]}"
     order = insert_test_order(test_db_url, user_id=1, total_paise=10000, razorpay_order_id=rzp_order_id, status="failed")
     order_id = order["id"]
+    rzp_payment_id = f"pay_{uuid.uuid4().hex[:8]}"
 
     payload = {
         "event": "payment.captured",
         "payload": {
             "payment": {
                 "entity": {
-                    "id": f"pay_{uuid.uuid4().hex[:8]}",
+                    "id": rzp_payment_id,
                     "amount": 10000,
                     "order_id": rzp_order_id,
                 }
@@ -275,21 +277,33 @@ def test_order_in_failed_status_receives_payment_captured(client, sign_webhook, 
         },
     }
     raw_bytes = json.dumps(payload).encode("utf-8")
-    res = client.post(
-        "/api/webhooks/razorpay",
-        content=raw_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "X-Razorpay-Signature": sign_webhook(raw_bytes),
-            "X-Razorpay-Event-Id": f"evt_fail_cap_{uuid.uuid4().hex[:8]}",
-        },
-    )
+    with caplog.at_level(logging.WARNING):
+        res = client.post(
+            "/api/webhooks/razorpay",
+            content=raw_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "X-Razorpay-Signature": sign_webhook(raw_bytes),
+                "X-Razorpay-Event-Id": f"evt_fail_cap_{uuid.uuid4().hex[:8]}",
+            },
+        )
 
     assert res.status_code == 200
     assert res.json()["status"] != "processed"
     assert res.json()["status"] == "ignored"
     assert res.json()["reason"] == "order_status_failed"
     assert get_order_row(order_id)["status"] == "failed"
+
+    # Assert warning logged for manual refund
+    warning_logged = any(
+        record.levelno == logging.WARNING
+        and "Payment captured for expired/failed order" in record.message
+        and "manual refund may be needed" in record.message
+        and str(order_id) in record.message
+        and rzp_payment_id in record.message
+        for record in caplog.records
+    )
+    assert warning_logged, f"Expected warning was not found in logs: {[r.message for r in caplog.records]}"
 
 
 # Tests that webhooks for an unknown razorpay_order_id return 200 ignored without raising exceptions or modifying data.
@@ -341,7 +355,7 @@ def test_razorpay_sdk_failure_marks_order_failed_and_restores_stock(client, prod
     response = client.post("/api/orders", json=payload, headers=headers)
 
     assert response.status_code == 502
-    assert "failed to create razorpay payment order" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Payment provider error. Please try again later."
 
     # Verify inventory was restored exactly once back to initial stock
     assert get_stock(pen["id"]) == initial_stock
@@ -354,3 +368,26 @@ def test_razorpay_sdk_failure_marks_order_failed_and_restores_stock(client, prod
             db_order = cur.fetchone()
             assert db_order is not None
             assert db_order["status"] == "failed"
+
+
+# Tests that when the Razorpay SDK raises an error with internal/secret details,
+# the API responds with 502, never leaks provider error details to the client, and returns the generic error message.
+def test_razorpay_error_does_not_leak_provider_details(client, products, user_tokens, monkeypatch):
+    from app.services import razorpay_service
+    user = user_tokens["user1"]
+    pen = products["pen"]
+    secret_marker = "SECRET_PROVIDER_DETAIL_123"
+
+    def failing_razorpay_call(total_paise: int, receipt: str):
+        raise RuntimeError(f"Internal gateway connection error: {secret_marker}")
+
+    monkeypatch.setattr(razorpay_service, "create_razorpay_order", failing_razorpay_call)
+
+    payload = {"items": [{"product_id": str(pen["id"]), "quantity": 1}]}
+    headers = {**user["headers"], "Idempotency-Key": f"key-leak-check-{uuid.uuid4().hex[:8]}"}
+
+    response = client.post("/api/orders", json=payload, headers=headers)
+
+    assert response.status_code == 502
+    assert secret_marker not in response.text
+    assert response.json()["detail"] == "Payment provider error. Please try again later."

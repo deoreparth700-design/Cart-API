@@ -158,7 +158,7 @@ Only the webhook can set paid.
 | `GET` | `/health` | No | None | `200` | None |
 | `GET` | `/static/index.html` | No | None | `200` | `404` |
 | `GET` | `/static/checkout_test.html` | No | None (reads URL query parameters) | `200` | `404` |
-| `GET` | `/api/demo-token` | No | None | `200` (only when `DEMO_MODE=true`) | `404` (when demo mode is off) |
+| `GET` | `/api/demo-token` | No | None | `200` (only when `DEMO_MODE=true`) | `404` (when demo mode is off), `429` (rate limited) |
 | `GET` | `/api/products` | No | None | `200` | `500` |
 | `POST` | `/api/orders` | Yes | `Authorization: Bearer <token>`<br>`Idempotency-Key: <string>`<br>`Content-Type: application/json` | `201` (new)<br>`200` (replayed) | `400`, `401`, `404`, `409`, `502` |
 | `GET` | `/api/orders/{id}` | Yes | `Authorization: Bearer <token>` | `200` | `401`, `404` |
@@ -225,9 +225,11 @@ docker compose run --rm test
 ### Test Files
 
 - `tests/test_demo_auth.py`
-  Tests the demo-token endpoint: returns 404 when `DEMO_MODE` is off, returns a token for the fixed demo user with a 30-minute expiry when on, ignores query parameters, and keeps demo orders isolated from other users' orders.
+  Tests the demo-token endpoint: returns 404 when `DEMO_MODE` is off, returns a token for the fixed demo user with a 30-minute expiry when on, ignores query parameters, enforces in-memory rate limiting (5 req/min per IP, HTTP 429), and keeps demo orders isolated from other users' orders.
 - `tests/test_edge_cases.py`
   Tests edge cases such as static HTML delivery and malformed JSON payloads. Verifies that unexpected errors roll back transactions and non-idempotency unique errors re-raise.
+- `tests/test_order_expiry.py`
+  Tests 30-minute abandoned checkout stock release: verifies expired 'created' orders are marked 'failed' and restore inventory on next order placement, fresh and paid orders are untouched, and double-release does not occur.
 - `tests/test_order_idempotency.py`
   Tests header validation, blank keys, and repeated identical keys returning 201 then 200 with unchanged stock. Verifies concurrent race safety where simultaneous threads with the same key produce exactly one order.
 - `tests/test_order_transaction.py`
@@ -259,12 +261,11 @@ I removed three guards on purpose and watched what happened, then restored them:
 
 ## Known Limits
 
-- A failed payment leaves the order 'created' because Razorpay lets the customer retry, so unpaid orders keep their stock reserved until an expiry job exists (not built).
-- If a webhook is never delivered the order stays 'created' until Razorpay retries (a reconciliation job is future work).
+- **Abandoned checkouts:** Orders in 'created' status reserve stock for 30 minutes. If checkout is abandoned or unpaid after 30 minutes, the next order placement automatically marks them as 'failed' and restores their reserved stock to the catalog.
+- If a webhook is never delivered the order stays 'created' until Razorpay retries or until 30-minute expiration releases its reserved stock.
 - Reusing a key with a different cart returns the first order.
-- No refunds.
-- No rate limiting.
-- With DEMO_MODE on, anyone can get a 30-minute token for a fixed demo user (id 999999), place test-mode orders and use up stock; there is no rate limiting.
+- A payment captured after an order has expired is ignored by the webhook and logged for manual refund.
+- **Demo token rate limiting:** The public `/api/demo-token` endpoint is rate-limited to 5 requests per minute per client IP (returns HTTP 429 when exceeded).
 
 ## Screenshots
 
@@ -305,6 +306,7 @@ Cart-API/
 │   ├── core/
 │   │   ├── config.py
 │   │   ├── database.py
+│   │   ├── rate_limit.py
 │   │   └── security.py
 │   ├── repositories/
 │   │   ├── order_repo.py
@@ -338,6 +340,7 @@ Cart-API/
     ├── conftest.py
     ├── test_demo_auth.py
     ├── test_edge_cases.py
+    ├── test_order_expiry.py
     ├── test_order_idempotency.py
     ├── test_order_transaction.py
     ├── test_signature.py

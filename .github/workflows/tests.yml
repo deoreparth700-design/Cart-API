@@ -76,3 +76,20 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install linter
+        run: pip install ruff==0.17.3
+
+      - name: Run ruff check
+        run: ruff check .

@@ -341,7 +341,7 @@ def test_razorpay_sdk_failure_marks_order_failed_and_restores_stock(client, prod
     response = client.post("/api/orders", json=payload, headers=headers)
 
     assert response.status_code == 502
-    assert "failed to create razorpay payment order" in response.json()["detail"].lower()
+    assert response.json()["detail"] == "Payment provider error. Please try again later."
 
     # Verify inventory was restored exactly once back to initial stock
     assert get_stock(pen["id"]) == initial_stock
@@ -354,3 +354,26 @@ def test_razorpay_sdk_failure_marks_order_failed_and_restores_stock(client, prod
             db_order = cur.fetchone()
             assert db_order is not None
             assert db_order["status"] == "failed"
+
+
+# Tests that when the Razorpay SDK raises an error with internal/secret details,
+# the API responds with 502, never leaks provider error details to the client, and returns the generic error message.
+def test_razorpay_error_does_not_leak_provider_details(client, products, user_tokens, monkeypatch):
+    from app.services import razorpay_service
+    user = user_tokens["user1"]
+    pen = products["pen"]
+    secret_marker = "SECRET_PROVIDER_DETAIL_123"
+
+    def failing_razorpay_call(total_paise: int, receipt: str):
+        raise RuntimeError(f"Internal gateway connection error: {secret_marker}")
+
+    monkeypatch.setattr(razorpay_service, "create_razorpay_order", failing_razorpay_call)
+
+    payload = {"items": [{"product_id": str(pen["id"]), "quantity": 1}]}
+    headers = {**user["headers"], "Idempotency-Key": f"key-leak-check-{uuid.uuid4().hex[:8]}"}
+
+    response = client.post("/api/orders", json=payload, headers=headers)
+
+    assert response.status_code == 502
+    assert secret_marker not in response.text
+    assert response.json()["detail"] == "Payment provider error. Please try again later."

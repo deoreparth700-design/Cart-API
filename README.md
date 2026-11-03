@@ -229,7 +229,7 @@ docker compose run --rm test
 - `tests/test_edge_cases.py`
   Tests edge cases such as static HTML delivery and malformed JSON payloads. Verifies that unexpected errors roll back transactions and non-idempotency unique errors re-raise.
 - `tests/test_order_expiry.py`
-  Tests 15-minute abandoned checkout stock release: verifies expired 'created' orders are marked 'failed' and restore inventory on next order placement, fresh and paid orders are untouched, and double-release does not occur.
+  Tests 30-minute abandoned checkout stock release: verifies expired 'created' orders are marked 'failed' and restore inventory on next order placement, fresh and paid orders are untouched, and double-release does not occur.
 - `tests/test_order_idempotency.py`
   Tests header validation, blank keys, and repeated identical keys returning 201 then 200 with unchanged stock. Verifies concurrent race safety where simultaneous threads with the same key produce exactly one order.
 - `tests/test_order_transaction.py`
@@ -261,10 +261,10 @@ I removed three guards on purpose and watched what happened, then restored them:
 
 ## Known Limits
 
-- **Abandoned checkouts:** Orders in 'created' status reserve stock for 15 minutes. If checkout is abandoned or unpaid after 15 minutes, the next order placement automatically marks them as 'failed' and restores their reserved stock to the catalog.
-- If a webhook is never delivered the order stays 'created' until Razorpay retries or until 15-minute expiration releases its reserved stock.
+- **Abandoned checkouts:** Orders in 'created' status reserve stock for 30 minutes. If checkout is abandoned or unpaid after 30 minutes, the next order placement automatically marks them as 'failed' and restores their reserved stock to the catalog.
+- If a webhook is never delivered the order stays 'created' until Razorpay retries or until 30-minute expiration releases its reserved stock.
 - Reusing a key with a different cart returns the first order.
-- No refunds.
+- A payment captured after an order has expired is ignored by the webhook and logged for manual refund.
 - **Demo token rate limiting:** The public `/api/demo-token` endpoint is rate-limited to 5 requests per minute per client IP (returns HTTP 429 when exceeded).
 
 ## Screenshots

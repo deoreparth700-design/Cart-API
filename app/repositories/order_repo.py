@@ -186,13 +186,14 @@ def mark_order_paid(
 
 
 
-ORDER_EXPIRY_MINUTES = 15
+ORDER_RESERVATION_MINUTES = 30
+ORDER_EXPIRY_MINUTES = ORDER_RESERVATION_MINUTES
 
 
 # Finds and marks expired 'created' orders as 'failed' and restores product stock atomically.
 # Using UPDATE ... WHERE status = 'created' ... RETURNING guarantees each expired order is released exactly once under concurrency.
 def release_expired_orders(
-    conn: psycopg.Connection, expiry_minutes: int = ORDER_EXPIRY_MINUTES
+    conn: psycopg.Connection, expiry_minutes: int = ORDER_RESERVATION_MINUTES
 ) -> list[UUID]:
     if not hasattr(conn, "cursor"):
         return []

@@ -113,7 +113,7 @@ def create_order(
             total_paise=total_paise,
             receipt=str(order["id"]),
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Payment provider call failed for order %s", order["id"])
         # If the Razorpay call fails: run a second transaction that sets the order to 'failed'
         # and gives the stock back for every item, then return HTTP 502 Bad Gateway.

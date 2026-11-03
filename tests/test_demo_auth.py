@@ -180,3 +180,31 @@ def test_demo_token_rate_limit_resets_after_window(client, monkeypatch):
     res_after = client.get("/api/demo-token")
     assert res_after.status_code == 200
 
+
+# Verifies that stale IP entries older than the window are pruned from memory on each call.
+def test_demo_token_rate_limit_prunes_stale_ip_entries(client, monkeypatch):
+    from app.core.rate_limit import _ip_request_timestamps
+    monkeypatch.setattr(settings, "DEMO_MODE", True)
+
+    simulated_time = 100000.0
+    monkeypatch.setattr(time, "time", lambda: simulated_time)
+
+    # Request from IP 1
+    monkeypatch.setattr(Request, "client", property(lambda self: Address("198.51.100.1", 50000)))
+    res1 = client.get("/api/demo-token")
+    assert res1.status_code == 200
+    assert "198.51.100.1" in _ip_request_timestamps
+
+    # Advance time past 60 seconds (window expires for IP 1)
+    simulated_time += 65.0
+
+    # Request from IP 2 triggers pruning of expired IP 1
+    monkeypatch.setattr(Request, "client", property(lambda self: Address("198.51.100.2", 50000)))
+    res2 = client.get("/api/demo-token")
+    assert res2.status_code == 200
+
+    # IP 1 must be pruned from memory; only active IP 2 remains
+    assert "198.51.100.1" not in _ip_request_timestamps
+    assert "198.51.100.2" in _ip_request_timestamps
+
+

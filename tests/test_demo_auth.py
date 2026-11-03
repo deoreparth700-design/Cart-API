@@ -3,16 +3,27 @@
 # and database-level user isolation on order retrieval.
 
 from datetime import datetime, timezone
+import time
 import uuid
 import jwt
 import psycopg
 from psycopg.rows import dict_row
 import pytest
+from starlette.datastructures import Address
+from starlette.requests import Request
 
 from app.core.config import settings
+from app.core.rate_limit import reset_rate_limits, RATE_LIMIT_ERROR_DETAIL
 from tests.conftest import test_db_url
 
 FIXED_DEMO_USER_ID = 999999
+
+
+@pytest.fixture(autouse=True)
+def clean_rate_limits():
+    reset_rate_limits()
+    yield
+    reset_rate_limits()
 
 
 # Helper to insert test orders with specific user IDs directly into the test database.
@@ -112,3 +123,60 @@ def test_demo_token_order_access_isolation(client, monkeypatch):
     res_other = client.get(f"/api/orders/{other_order['id']}", headers=auth_headers)
     assert res_other.status_code == 404
     assert res_other.json()["detail"] == "Order not found"
+
+
+# Verifies that making 5 requests succeeds and the 6th returns HTTP 429.
+def test_demo_token_rate_limit_blocks_sixth_request(client, monkeypatch):
+    monkeypatch.setattr(settings, "DEMO_MODE", True)
+
+    for i in range(5):
+        res = client.get("/api/demo-token")
+        assert res.status_code == 200, f"Request {i+1} should succeed"
+
+    res_blocked = client.get("/api/demo-token")
+    assert res_blocked.status_code == 429
+    assert res_blocked.json()["detail"] == RATE_LIMIT_ERROR_DETAIL
+
+
+# Verifies that rate limiting is isolated per client IP address.
+def test_demo_token_rate_limit_different_ip_unaffected(client, monkeypatch):
+    monkeypatch.setattr(settings, "DEMO_MODE", True)
+
+    # Exhaust quota (5 requests) for default client IP ("testclient")
+    for _ in range(5):
+        res = client.get("/api/demo-token")
+        assert res.status_code == 200
+
+    # 6th request from default IP is blocked
+    res_blocked = client.get("/api/demo-token")
+    assert res_blocked.status_code == 429
+
+    # Request from a different IP address succeeds
+    monkeypatch.setattr(Request, "client", property(lambda self: Address("198.51.100.5", 50000)))
+    res_other_ip = client.get("/api/demo-token")
+    assert res_other_ip.status_code == 200
+
+
+# Verifies that the rate limit window resets after 60 seconds without needing to sleep.
+def test_demo_token_rate_limit_resets_after_window(client, monkeypatch):
+    monkeypatch.setattr(settings, "DEMO_MODE", True)
+
+    simulated_time = 100000.0
+    monkeypatch.setattr(time, "time", lambda: simulated_time)
+
+    # 5 requests within the window
+    for _ in range(5):
+        res = client.get("/api/demo-token")
+        assert res.status_code == 200
+
+    # 6th request within window is blocked
+    res_blocked = client.get("/api/demo-token")
+    assert res_blocked.status_code == 429
+
+    # Advance simulated time past the 60-second window
+    simulated_time += 61.0
+
+    # New request should now succeed
+    res_after = client.get("/api/demo-token")
+    assert res_after.status_code == 200
+

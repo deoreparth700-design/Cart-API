@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 import jwt
 
 from app.core.config import settings
+from app.core.rate_limit import check_demo_token_rate_limit
 
 # Fixed identifier for the demo user.
 # Using 999999 ensures demo activity is completely separated from real registered users.
@@ -18,7 +19,7 @@ router = APIRouter(tags=["demo"])
 # Returns 404 Not Found if DEMO_MODE is false to prevent unauthorized access in production.
 # The endpoint does not accept any query or body arguments, so user ID and expiry cannot be tampered with.
 @router.get("/demo-token", include_in_schema=False)
-def get_demo_token():
+def get_demo_token(request: Request):
     """
     Returns a short-lived demo JWT for testing the storefront.
     Disabled in production unless DEMO_MODE is explicitly set to true.
@@ -28,6 +29,8 @@ def get_demo_token():
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Demo mode is disabled",
         )
+
+    check_demo_token_rate_limit(request)
 
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=DEMO_TOKEN_EXPIRY_MINUTES)

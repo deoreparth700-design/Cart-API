@@ -1,4 +1,4 @@
-# Integration tests for abandoned order stock release and 15-minute expiration window.
+# Integration tests for abandoned order stock release and 30-minute expiration window.
 # Verifies that expired 'created' orders are marked 'failed' and release stock,
 # fresh orders and paid orders are untouched, and double-release does not occur under concurrency.
 
@@ -13,7 +13,7 @@ from tests.conftest import test_db_url
 
 
 # Helper to age an order in the test database without sleeping
-def age_order(order_id: uuid.UUID | str, minutes_ago: int = 20):
+def age_order(order_id: uuid.UUID | str, minutes_ago: int = 35):
     with psycopg.connect(test_db_url, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -28,6 +28,8 @@ def age_order(order_id: uuid.UUID | str, minutes_ago: int = 20):
 
 # 1. Expired order releases stock and transitions to 'failed'
 def test_expired_order_releases_stock(client, products, user_tokens, get_stock, get_order_row):
+    assert order_repo.ORDER_RESERVATION_MINUTES == 30
+
     user = user_tokens["user1"]
     pen = products["pen"]
     initial_stock = get_stock(pen["id"])
@@ -41,8 +43,8 @@ def test_expired_order_releases_stock(client, products, user_tokens, get_stock, 
     assert get_stock(pen["id"]) == initial_stock - 2
     assert get_order_row(order_id)["status"] == "created"
 
-    # Age the order by 20 minutes (exceeding 15 min expiration window)
-    age_order(order_id, minutes_ago=20)
+    # Age the order by 35 minutes (exceeding 30 min expiration window)
+    age_order(order_id, minutes_ago=35)
 
     # Call release_expired_orders
     with transaction() as conn:
@@ -54,7 +56,7 @@ def test_expired_order_releases_stock(client, products, user_tokens, get_stock, 
     assert get_stock(pen["id"]) == initial_stock
 
 
-# 2. Fresh order (younger than 15 min) is untouched
+# 2. Fresh order (younger than 30 min) is untouched
 def test_fresh_order_is_untouched(client, products, user_tokens, get_stock, get_order_row):
     user = user_tokens["user1"]
     pen = products["pen"]
@@ -67,8 +69,8 @@ def test_fresh_order_is_untouched(client, products, user_tokens, get_stock, get_
     order_id = res.json()["id"]
     assert get_stock(pen["id"]) == initial_stock - 1
 
-    # Order is 5 minutes old (fresh, not expired)
-    age_order(order_id, minutes_ago=5)
+    # Order is 10 minutes old (fresh, not expired)
+    age_order(order_id, minutes_ago=10)
 
     with transaction() as conn:
         released = order_repo.release_expired_orders(conn)
@@ -78,7 +80,7 @@ def test_fresh_order_is_untouched(client, products, user_tokens, get_stock, get_
     assert get_stock(pen["id"]) == initial_stock - 1
 
 
-# 3. Releasing twice does not restore stock twice
+# 3. Releasing twice does not double restore stock
 def test_releasing_twice_does_not_double_restore_stock(client, products, user_tokens, get_stock, get_order_row):
     user = user_tokens["user1"]
     pen = products["pen"]
@@ -90,7 +92,7 @@ def test_releasing_twice_does_not_double_restore_stock(client, products, user_to
     assert res.status_code == 201
     order_id = res.json()["id"]
 
-    age_order(order_id, minutes_ago=25)
+    age_order(order_id, minutes_ago=40)
 
     # First release
     with transaction() as conn:
@@ -125,8 +127,8 @@ def test_paid_order_is_never_released(client, products, user_tokens, get_stock, 
         with conn.cursor() as cur:
             cur.execute("UPDATE orders SET status = 'paid' WHERE id = %s;", (order_id,))
 
-    # Age the paid order past 15 minutes
-    age_order(order_id, minutes_ago=30)
+    # Age the paid order past 30 minutes
+    age_order(order_id, minutes_ago=45)
 
     with transaction() as conn:
         released = order_repo.release_expired_orders(conn)
@@ -165,8 +167,8 @@ def test_create_order_automatically_releases_abandoned_stock(client, products, u
     )
     assert res2_fail.status_code == 409
 
-    # User 1 abandons checkout (age order past 15 min)
-    age_order(order1_id, minutes_ago=16)
+    # User 1 abandons checkout (age order past 30 min)
+    age_order(order1_id, minutes_ago=31)
 
     # User 2 orders again -> create_order releases User 1's expired order and succeeds with 201!
     res2_success = client.post(

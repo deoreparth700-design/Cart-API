@@ -255,19 +255,21 @@ def test_payment_captured_with_wrong_amount(client, sign_webhook, get_order_row)
     assert get_order_row(order_id)["status"] == "created", "Order must stay in 'created' status"
 
 
-# Tests that an order already in 'failed' status receiving payment.captured stays 'failed' and replies with 'ignored'.
-def test_order_in_failed_status_receives_payment_captured(client, sign_webhook, get_order_row):
+# Tests that an order already in 'failed' status receiving payment.captured stays 'failed', replies with 'ignored', and logs a warning for manual refund.
+def test_order_in_failed_status_receives_payment_captured(client, sign_webhook, get_order_row, caplog):
+    import logging
     from tests.conftest import test_db_url
     rzp_order_id = f"order_{uuid.uuid4().hex[:14]}"
     order = insert_test_order(test_db_url, user_id=1, total_paise=10000, razorpay_order_id=rzp_order_id, status="failed")
     order_id = order["id"]
+    rzp_payment_id = f"pay_{uuid.uuid4().hex[:8]}"
 
     payload = {
         "event": "payment.captured",
         "payload": {
             "payment": {
                 "entity": {
-                    "id": f"pay_{uuid.uuid4().hex[:8]}",
+                    "id": rzp_payment_id,
                     "amount": 10000,
                     "order_id": rzp_order_id,
                 }
@@ -275,21 +277,33 @@ def test_order_in_failed_status_receives_payment_captured(client, sign_webhook, 
         },
     }
     raw_bytes = json.dumps(payload).encode("utf-8")
-    res = client.post(
-        "/api/webhooks/razorpay",
-        content=raw_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "X-Razorpay-Signature": sign_webhook(raw_bytes),
-            "X-Razorpay-Event-Id": f"evt_fail_cap_{uuid.uuid4().hex[:8]}",
-        },
-    )
+    with caplog.at_level(logging.WARNING):
+        res = client.post(
+            "/api/webhooks/razorpay",
+            content=raw_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "X-Razorpay-Signature": sign_webhook(raw_bytes),
+                "X-Razorpay-Event-Id": f"evt_fail_cap_{uuid.uuid4().hex[:8]}",
+            },
+        )
 
     assert res.status_code == 200
     assert res.json()["status"] != "processed"
     assert res.json()["status"] == "ignored"
     assert res.json()["reason"] == "order_status_failed"
     assert get_order_row(order_id)["status"] == "failed"
+
+    # Assert warning logged for manual refund
+    warning_logged = any(
+        record.levelno == logging.WARNING
+        and "Payment captured for expired/failed order" in record.message
+        and "manual refund may be needed" in record.message
+        and str(order_id) in record.message
+        and rzp_payment_id in record.message
+        for record in caplog.records
+    )
+    assert warning_logged, f"Expected warning was not found in logs: {[r.message for r in caplog.records]}"
 
 
 # Tests that webhooks for an unknown razorpay_order_id return 200 ignored without raising exceptions or modifying data.

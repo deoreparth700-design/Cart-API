@@ -4,8 +4,6 @@
 
 import uuid
 import psycopg
-from psycopg.rows import dict_row
-import pytest
 
 from app.core.database import transaction
 from app.repositories import order_repo

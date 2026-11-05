@@ -48,13 +48,13 @@ if "test" not in test_db_name.lower():
 # Configure environment variable so app settings instantiate with TEST_DATABASE_URL
 os.environ["DATABASE_URL"] = test_db_url
 
-from app.core.config import get_settings
+from app.core.config import get_settings  # noqa: E402  # env var must be set before importing app config
 get_settings.cache_clear()
 settings = get_settings()
 
-import app.core.database as db
-from app.main import app
-from app.services import razorpay_service
+import app.core.database as db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.services import razorpay_service  # noqa: E402
 
 # Re-initialize the application database connection pool to point to TEST_DATABASE_URL
 if not db.pool.closed:

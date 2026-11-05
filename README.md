@@ -346,3 +346,5 @@ Cart-API/
     ├── test_signature.py
     └── test_webhook_idempotency.py
 ```
+
+License: MIT

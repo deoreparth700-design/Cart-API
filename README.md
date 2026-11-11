@@ -265,7 +265,7 @@ I removed three guards on purpose and watched what happened, then restored them:
 - If a webhook is never delivered the order stays 'created' until Razorpay retries or until 30-minute expiration releases its reserved stock.
 - Reusing a key with a different cart returns the first order.
 - A payment captured after an order has expired is ignored by the webhook and logged for manual refund.
-- **Demo token rate limiting:** The public `/api/demo-token` endpoint is rate-limited to 5 requests per minute per client IP (returns HTTP 429 when exceeded).
+- **Demo token rate limiting:** The public `/api/demo-token` endpoint is rate-limited to 5 requests per minute per client IP (returns HTTP 429 when exceeded). Behind a reverse proxy such as Render, the server must run with `--proxy-headers --forwarded-allow-ips` so the demo-token rate limit sees real client IPs.
 
 ## Screenshots
 
